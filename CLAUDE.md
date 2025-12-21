@@ -85,3 +85,46 @@ import {
   colors as pc,        // picocolors
 } from "@toolbox/common";
 ```
+
+## Commits & Releases
+
+### Conventional Commits (enforced by commitlint)
+
+```bash
+feat(ec2-ssm): add instance filtering    # New feature
+fix(common): handle empty clipboard      # Bug fix
+docs: update README                      # Documentation
+build(deps): upgrade aws-sdk             # Dependencies
+chore: cleanup                           # Maintenance
+```
+
+**Allowed scopes:** `aws-creds`, `ec2-ssm`, `secrets-view`, `common`, `deps`
+
+### Changesets (IMPORTANT)
+
+**After making any user-facing changes, ALWAYS add a changeset:**
+
+```bash
+bun run changeset
+```
+
+Or create manually in `.changeset/<name>.md`:
+
+```markdown
+---
+"@toolbox/ec2-ssm": patch
+---
+
+Fix instance selection when no Name tag exists
+```
+
+**Bump types:**
+- `patch` - Bug fixes, minor tweaks
+- `minor` - New features, enhancements
+- `major` - Breaking changes
+
+**Workflow:**
+1. Make changes with conventional commits
+2. Add changeset describing the change
+3. Push to main → GitHub Action creates Release PR
+4. Merge Release PR → GitHub Release created automatically
