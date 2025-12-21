@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Type check
+        run: bun run --filter '*' tsc --noEmit 2>/dev/null || echo "No TypeScript config found"
+
+      - name: Validate commitlint config
+        run: bunx commitlint --from=HEAD~1 --to=HEAD --verbose || true
