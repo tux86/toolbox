@@ -1,6 +1,6 @@
 {
   "name": "@toolbox/secrets-view",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "bin": {
     "secrets-view": "./secrets-view"
