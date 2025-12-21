@@ -2,6 +2,7 @@
 
 A collection of interactive CLI tools built with **Bun** + **TypeScript**, featuring beautiful TUI interfaces powered by [@clack/prompts](https://github.com/natemoo-re/clack).
 
+[![CI](https://github.com/tux86/toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/tux86/toolbox/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?logo=bun&logoColor=white)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
