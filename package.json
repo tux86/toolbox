@@ -1,12 +1,19 @@
 {
   "name": "toolbox",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "aws-creds": "bun run --cwd packages/aws-creds start",
     "ec2-ssm": "bun run --cwd packages/ec2-ssm start",
-    "secrets-view": "bun run --cwd packages/secrets-view start"
+    "secrets-view": "bun run --cwd packages/secrets-view start",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.2.0",
+    "@commitlint/config-conventional": "^20.2.0",
+    "husky": "^9.1.7"
   }
 }
