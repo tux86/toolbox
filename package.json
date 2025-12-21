@@ -1,0 +1,12 @@
+{
+  "name": "toolbox",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "aws-creds": "bun run --cwd packages/aws-creds start",
+    "ec2-ssm": "bun run --cwd packages/ec2-ssm start",
+    "secrets-view": "bun run --cwd packages/secrets-view start"
+  }
+}

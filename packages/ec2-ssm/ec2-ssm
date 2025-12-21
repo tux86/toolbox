@@ -1,0 +1,160 @@
+#!/usr/bin/env bun
+/**
+ * EC2 SSM Shell - Interactive TUI for connecting to EC2 instances via SSM
+ */
+
+import { EC2Client, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
+import { SSMClient, DescribeInstanceInformationCommand } from "@aws-sdk/client-ssm";
+import { spawn } from "child_process";
+import {
+  colors as pc,
+  prompts as p,
+  getAwsEnv,
+  getAwsClientConfig,
+  fetchAndDisplayIdentity,
+  withSpinner,
+  selectFromList,
+  runApp,
+  goodbye,
+} from "@toolbox/common";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface EC2Instance {
+  instanceId: string;
+  name: string;
+  privateIp: string;
+  instanceType: string;
+  ssmOnline: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instance Discovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getSSMOnlineInstances(ssm: SSMClient): Promise<Set<string>> {
+  const online = new Set<string>();
+  let nextToken: string | undefined;
+
+  do {
+    const cmd = new DescribeInstanceInformationCommand({
+      NextToken: nextToken,
+      Filters: [{ Key: "PingStatus", Values: ["Online"] }],
+    });
+    const resp = await ssm.send(cmd);
+
+    for (const info of resp.InstanceInformationList || []) {
+      if (info.InstanceId) online.add(info.InstanceId);
+    }
+    nextToken = resp.NextToken;
+  } while (nextToken);
+
+  return online;
+}
+
+async function listEC2Instances(ec2: EC2Client, ssm: SSMClient): Promise<EC2Instance[]> {
+  const instances: EC2Instance[] = [];
+  let nextToken: string | undefined;
+
+  const ssmOnline = await getSSMOnlineInstances(ssm);
+
+  do {
+    const cmd = new DescribeInstancesCommand({
+      NextToken: nextToken,
+      Filters: [{ Name: "instance-state-name", Values: ["running"] }],
+    });
+    const resp = await ec2.send(cmd);
+
+    for (const reservation of resp.Reservations || []) {
+      for (const instance of reservation.Instances || []) {
+        if (!instance.InstanceId) continue;
+
+        const nameTag = instance.Tags?.find(t => t.Key === "Name");
+        instances.push({
+          instanceId: instance.InstanceId,
+          name: nameTag?.Value || "-",
+          privateIp: instance.PrivateIpAddress || "-",
+          instanceType: instance.InstanceType || "-",
+          ssmOnline: ssmOnline.has(instance.InstanceId),
+        });
+      }
+    }
+    nextToken = resp.NextToken;
+  } while (nextToken);
+
+  return instances
+    .filter(i => i.ssmOnline)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSM Session
+// ─────────────────────────────────────────────────────────────────────────────
+
+function startSSMSession(instanceId: string, profile?: string, region?: string): Promise<number> {
+  return new Promise((resolve) => {
+    const args = ["ssm", "start-session", "--target", instanceId];
+    if (profile) args.push("--profile", profile);
+    if (region) args.push("--region", region);
+
+    const proc = spawn("aws", args, { stdio: "inherit" });
+
+    proc.on("close", (code) => resolve(code || 0));
+    proc.on("error", (err) => {
+      console.error(pc.red(`Failed to start session: ${err.message}`));
+      resolve(1);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formatters
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatInstance(inst: EC2Instance): string {
+  return `${pc.bold(inst.name.padEnd(30))} ${pc.dim(inst.instanceId)} ${pc.cyan(inst.privateIp)} ${pc.dim(inst.instanceType)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────────────────────
+
+runApp({ name: "🖥️  EC2 SSM Shell", color: pc.bgCyan }, async () => {
+  const config = getAwsClientConfig();
+  const ec2 = new EC2Client(config);
+  const ssm = new SSMClient(config);
+  const { profile, region } = getAwsEnv();
+
+  await fetchAndDisplayIdentity();
+
+  const instances = await withSpinner(
+    () => listEC2Instances(ec2, ssm),
+    {
+      start: "Fetching EC2 instances...",
+      success: (r) => `Found ${pc.bold(r.length)} instance(s) with SSM online`,
+      error: "Failed to fetch instances",
+    }
+  );
+
+  const selected = await selectFromList(instances, {
+    message: "Select an instance to connect:",
+    formatLabel: formatInstance,
+    emptyMessage: "No instances with SSM agent online found.",
+  });
+
+  if (!selected) {
+    goodbye();
+    return;
+  }
+
+  p.log.step(`Connecting to ${pc.bold(selected.name)} (${selected.instanceId})...`);
+  console.log();
+
+  const exitCode = await startSSMSession(selected.instanceId, profile, region);
+
+  console.log();
+  p.outro(exitCode === 0 ? "Session ended." : pc.red(`Session exited with code ${exitCode}`));
+  process.exit(exitCode);
+});

@@ -1,0 +1,661 @@
+#!/usr/bin/env bun
+/**
+ * AWS Credentials Manager
+ * Modern interactive TUI for managing AWS SSO credentials
+ */
+
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import { fromSSO } from "@aws-sdk/credential-providers";
+import { parse as parseIni, stringify as stringifyIni } from "ini";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
+import {
+  colors as pc,
+  prompts as p,
+  runApp,
+  withSpinner,
+  goodbye,
+} from "@toolbox/common";
+
+// ===== TYPES =====
+
+interface SSOProfile {
+  name: string;
+  ssoStartUrl: string;
+  ssoAccountId: string;
+  ssoRoleName: string;
+  ssoRegion: string;
+  region?: string;
+  ssoSession?: string;
+}
+
+type CredentialStatus = "valid" | "expired" | "error" | "unknown";
+
+interface ProfileStatus {
+  profile: SSOProfile;
+  status: CredentialStatus;
+  expiresAt?: Date;
+  accountId?: string;
+  arn?: string;
+  error?: string;
+}
+
+interface AWSCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  expiration?: Date;
+}
+
+interface AppSettings {
+  notifications: boolean;
+  defaultInterval: number;
+  favoriteProfiles: string[];
+  lastRefresh?: string;
+}
+
+interface ConfigSection {
+  [key: string]: string | undefined;
+}
+
+interface ParsedConfig {
+  [section: string]: ConfigSection;
+}
+
+// ===== CONSTANTS =====
+
+const AWS_DIR = join(homedir(), ".aws");
+const CONFIG_PATH = join(AWS_DIR, "config");
+const CREDENTIALS_PATH = join(AWS_DIR, "credentials");
+const SSO_CACHE_DIR = join(AWS_DIR, "sso", "cache");
+const SETTINGS_PATH = join(AWS_DIR, "credentials-manager.json");
+
+const DEFAULT_SETTINGS: AppSettings = {
+  notifications: true,
+  defaultInterval: 30,
+  favoriteProfiles: [],
+};
+
+const REFRESH_INTERVALS = [
+  { value: 15, label: "15 minutes" },
+  { value: 30, label: "30 minutes", hint: "recommended" },
+  { value: 60, label: "1 hour" },
+  { value: 120, label: "2 hours" },
+];
+
+const STATUS_SYMBOLS = {
+  valid: pc.green("●"),
+  expired: pc.red("●"),
+  error: pc.yellow("●"),
+  unknown: pc.gray("●"),
+} as const;
+
+// ===== FILE UTILITIES =====
+
+async function parseAwsConfig(): Promise<ParsedConfig> {
+  try {
+    const content = await Bun.file(CONFIG_PATH).text();
+    return parseIni(content);
+  } catch {
+    return {};
+  }
+}
+
+async function parseCredentialsFile(): Promise<ParsedConfig> {
+  try {
+    const content = await Bun.file(CREDENTIALS_PATH).text();
+    return parseIni(content);
+  } catch {
+    return {};
+  }
+}
+
+async function writeCredentials(profileName: string, credentials: AWSCredentials): Promise<void> {
+  const existing = await parseCredentialsFile();
+
+  existing[profileName] = {
+    aws_access_key_id: credentials.accessKeyId,
+    aws_secret_access_key: credentials.secretAccessKey,
+    ...(credentials.sessionToken && { aws_session_token: credentials.sessionToken }),
+  };
+
+  await Bun.write(CREDENTIALS_PATH, stringifyIni(existing));
+}
+
+async function loadSettings(): Promise<AppSettings> {
+  try {
+    const content = await Bun.file(SETTINGS_PATH).text();
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+async function saveSettings(settings: AppSettings): Promise<void> {
+  await Bun.write(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+
+// ===== SSO CACHE =====
+
+async function findSSOTokenExpiry(startUrl: string): Promise<Date | null> {
+  try {
+    const glob = new Bun.Glob("*.json");
+    let latestExpiry: Date | null = null;
+
+    for await (const file of glob.scan(SSO_CACHE_DIR)) {
+      try {
+        const content = await Bun.file(join(SSO_CACHE_DIR, file)).json();
+        if (content.startUrl === startUrl && content.expiresAt) {
+          const expiresAt = new Date(content.expiresAt);
+          if (!latestExpiry || expiresAt > latestExpiry) {
+            latestExpiry = expiresAt;
+          }
+        }
+      } catch {
+        // Skip invalid cache files
+      }
+    }
+    return latestExpiry;
+  } catch {
+    return null;
+  }
+}
+
+// ===== AWS OPERATIONS =====
+
+async function discoverProfiles(): Promise<SSOProfile[]> {
+  const config = await parseAwsConfig();
+  const profiles: SSOProfile[] = [];
+  const ssoSessions: Map<string, ConfigSection> = new Map();
+
+  for (const [section, values] of Object.entries(config)) {
+    if (section.startsWith("sso-session ")) {
+      ssoSessions.set(section.replace("sso-session ", ""), values);
+    }
+  }
+
+  for (const [section, values] of Object.entries(config)) {
+    if (!section.startsWith("profile ") && section !== "default") continue;
+
+    const profileName = section === "default" ? "default" : section.replace("profile ", "");
+
+    if (values.sso_session) {
+      const session = ssoSessions.get(values.sso_session);
+      if (session && values.sso_account_id && values.sso_role_name) {
+        profiles.push({
+          name: profileName,
+          ssoStartUrl: session.sso_start_url || "",
+          ssoAccountId: values.sso_account_id,
+          ssoRoleName: values.sso_role_name,
+          ssoRegion: session.sso_region || "us-east-1",
+          region: values.region,
+          ssoSession: values.sso_session,
+        });
+      }
+    } else if (values.sso_start_url && values.sso_account_id && values.sso_role_name) {
+      profiles.push({
+        name: profileName,
+        ssoStartUrl: values.sso_start_url,
+        ssoAccountId: values.sso_account_id,
+        ssoRoleName: values.sso_role_name,
+        ssoRegion: values.sso_region || "us-east-1",
+        region: values.region,
+      });
+    }
+  }
+
+  return profiles;
+}
+
+async function checkTokenStatus(profile: SSOProfile): Promise<ProfileStatus> {
+  try {
+    const client = new STSClient({
+      region: profile.region || profile.ssoRegion,
+      credentials: fromSSO({ profile: profile.name }),
+    });
+
+    const response = await client.send(new GetCallerIdentityCommand({}));
+    const expiresAt = await findSSOTokenExpiry(profile.ssoStartUrl);
+
+    return {
+      profile,
+      status: "valid",
+      accountId: response.Account,
+      arn: response.Arn,
+      expiresAt: expiresAt || undefined,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message.toLowerCase() : "";
+
+    if (
+      errorMessage.includes("expired") ||
+      errorMessage.includes("invalid") ||
+      errorMessage.includes("token") ||
+      errorMessage.includes("sso") ||
+      errorMessage.includes("refresh") ||
+      errorMessage.includes("unauthorized")
+    ) {
+      return { profile, status: "expired", error: "Token expired or invalid" };
+    }
+
+    return {
+      profile,
+      status: "error",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+async function checkAllProfiles(profiles: SSOProfile[]): Promise<ProfileStatus[]> {
+  return Promise.all(profiles.map((profile) => checkTokenStatus(profile)));
+}
+
+async function triggerSSOLogin(profile: SSOProfile): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["aws", "sso", "login", "--profile", profile.name], {
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: "inherit",
+    });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function getCredentials(profile: SSOProfile): Promise<AWSCredentials | null> {
+  try {
+    const credentialProvider = fromSSO({ profile: profile.name });
+    const credentials = await credentialProvider();
+
+    return {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+      expiration: credentials.expiration,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function refreshProfile(
+  profile: SSOProfile,
+  settings: AppSettings
+): Promise<{ success: boolean; error?: string }> {
+  const status = await checkTokenStatus(profile);
+
+  if (status.status === "valid") {
+    const credentials = await getCredentials(profile);
+    if (credentials) {
+      await writeCredentials(profile.name, credentials);
+      return { success: true };
+    }
+    return { success: false, error: "Failed to retrieve credentials" };
+  }
+
+  if (settings.notifications) {
+    await sendNotification("AWS SSO Login Required", `Token expired for profile '${profile.name}'`);
+  }
+
+  console.log();
+  p.note(
+    `Browser will open for SSO authentication.\nComplete the login in your browser.`,
+    `SSO Login: ${profile.name}`
+  );
+
+  const loginSuccess = await triggerSSOLogin(profile);
+  if (!loginSuccess) {
+    return { success: false, error: "SSO login failed or cancelled" };
+  }
+
+  const credentials = await getCredentials(profile);
+  if (!credentials) {
+    return { success: false, error: "Failed to retrieve credentials after login" };
+  }
+
+  await writeCredentials(profile.name, credentials);
+  return { success: true };
+}
+
+// ===== NOTIFICATIONS =====
+
+async function sendNotification(title: string, message: string): Promise<void> {
+  const os = platform();
+  try {
+    if (os === "darwin") {
+      await Bun.spawn([
+        "osascript",
+        "-e",
+        `display notification "${message}" with title "${title}"`,
+      ]).exited;
+    } else if (os === "linux") {
+      await Bun.spawn(["notify-send", title, message]).exited;
+    }
+  } catch {
+    // Silently fail
+  }
+}
+
+// ===== UI COMPONENTS =====
+
+function formatExpiry(date?: Date): string {
+  if (!date) return pc.gray("Unknown");
+
+  const now = new Date();
+  const diff = date.getTime() - now.getTime();
+
+  if (diff < 0) return pc.red("Expired");
+
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) return pc.green(`${hours}h ${minutes % 60}m remaining`);
+  if (minutes < 15) return pc.yellow(`${minutes}m remaining`);
+  return pc.green(`${minutes}m remaining`);
+}
+
+function displayStatusTable(statuses: ProfileStatus[]): void {
+  console.log();
+  console.log(pc.bold("  Profile Status"));
+  console.log(pc.gray("  " + "─".repeat(50)));
+
+  for (const status of statuses) {
+    const symbol = STATUS_SYMBOLS[status.status];
+    const name = status.profile.name.padEnd(25);
+    const statusText =
+      status.status === "valid"
+        ? pc.green("Valid")
+        : status.status === "expired"
+          ? pc.red("Expired")
+          : pc.yellow("Error");
+    const expiry = formatExpiry(status.expiresAt);
+
+    console.log(`  ${symbol} ${name} ${statusText.padEnd(18)} ${expiry}`);
+
+    if (status.error && status.status === "error") {
+      console.log(pc.gray(`     └─ ${status.error}`));
+    }
+  }
+  console.log();
+}
+
+async function selectProfiles(
+  profiles: SSOProfile[],
+  statuses: ProfileStatus[],
+  settings: AppSettings
+): Promise<string[] | symbol> {
+  const options = profiles.map((profile) => {
+    const status = statuses.find((s) => s.profile.name === profile.name);
+    const symbol = status ? STATUS_SYMBOLS[status.status] : STATUS_SYMBOLS.unknown;
+    const isFavorite = settings.favoriteProfiles.includes(profile.name);
+
+    return {
+      value: profile.name,
+      label: `${symbol} ${profile.name}`,
+      hint: isFavorite ? "favorite" : undefined,
+    };
+  });
+
+  options.sort((a, b) => {
+    const aFav = settings.favoriteProfiles.includes(a.value);
+    const bFav = settings.favoriteProfiles.includes(b.value);
+    if (aFav && !bFav) return -1;
+    if (!aFav && bFav) return 1;
+    return a.value.localeCompare(b.value);
+  });
+
+  return await p.multiselect({
+    message: "Select profiles to refresh",
+    options,
+    required: true,
+  });
+}
+
+async function showMainMenu(): Promise<string | symbol> {
+  return await p.select({
+    message: "What would you like to do?",
+    options: [
+      { value: "status", label: "Check credentials status", hint: "view all profiles" },
+      { value: "refresh", label: "Refresh credentials", hint: "select profiles" },
+      { value: "daemon", label: "Start auto-refresh daemon", hint: "continuous mode" },
+      { value: "settings", label: "Settings", hint: "notifications & defaults" },
+      { value: "exit", label: "Exit" },
+    ],
+  });
+}
+
+async function manageSettings(settings: AppSettings, profiles: SSOProfile[]): Promise<AppSettings> {
+  const action = await p.select({
+    message: "Settings",
+    options: [
+      { value: "notifications", label: `Notifications: ${settings.notifications ? pc.green("On") : pc.red("Off")}` },
+      { value: "interval", label: `Default refresh interval: ${settings.defaultInterval} minutes` },
+      { value: "favorites", label: `Favorite profiles (${settings.favoriteProfiles.length})` },
+      { value: "back", label: "Back to main menu" },
+    ],
+  });
+
+  if (p.isCancel(action) || action === "back") return settings;
+
+  const newSettings = { ...settings };
+
+  if (action === "notifications") {
+    const enabled = await p.confirm({
+      message: "Enable system notifications?",
+      initialValue: settings.notifications,
+    });
+    if (!p.isCancel(enabled)) newSettings.notifications = enabled;
+  } else if (action === "interval") {
+    const interval = await p.select({
+      message: "Select default refresh interval",
+      options: REFRESH_INTERVALS,
+      initialValue: settings.defaultInterval,
+    });
+    if (!p.isCancel(interval)) newSettings.defaultInterval = interval as number;
+  } else if (action === "favorites") {
+    const favorites = await p.multiselect({
+      message: "Select favorite profiles (shown first)",
+      options: profiles.map((profile) => ({ value: profile.name, label: profile.name })),
+      initialValues: settings.favoriteProfiles,
+      required: false,
+    });
+    if (!p.isCancel(favorites)) newSettings.favoriteProfiles = favorites as string[];
+  }
+
+  await saveSettings(newSettings);
+  return newSettings;
+}
+
+// ===== DAEMON MODE =====
+
+async function runDaemon(
+  profiles: SSOProfile[],
+  selectedProfiles: string[],
+  intervalMinutes: number,
+  settings: AppSettings
+): Promise<void> {
+  const selectedProfileObjects = profiles.filter((p) => selectedProfiles.includes(p.name));
+
+  let running = true;
+
+  const handleSignal = () => {
+    running = false;
+    console.log(pc.yellow("\n\nStopping daemon..."));
+  };
+
+  process.on("SIGINT", handleSignal);
+  process.on("SIGTERM", handleSignal);
+
+  p.note(
+    `Monitoring ${selectedProfiles.length} profile(s)\n` +
+      `Refresh interval: ${intervalMinutes} minutes\n` +
+      `Press Ctrl+C to stop`,
+    "Auto-Refresh Daemon"
+  );
+
+  while (running) {
+    const spinner = p.spinner();
+    spinner.start("Checking credentials...");
+
+    let refreshed = 0;
+    let errors = 0;
+
+    for (const profile of selectedProfileObjects) {
+      if (!running) break;
+
+      spinner.message(`Processing ${profile.name}...`);
+      const result = await refreshProfile(profile, settings);
+
+      if (result.success) {
+        refreshed++;
+      } else {
+        errors++;
+        spinner.stop(pc.red(`  Error: ${profile.name} - ${result.error}`));
+        spinner.start("");
+      }
+    }
+
+    if (!running) break;
+
+    spinner.stop(
+      pc.green(`Refreshed ${refreshed} profile(s)`) + (errors > 0 ? pc.red(` (${errors} error(s))`) : "")
+    );
+
+    const nextRefresh = new Date(Date.now() + intervalMinutes * 60 * 1000);
+    console.log(pc.gray(`\nNext refresh at ${nextRefresh.toLocaleTimeString()}`));
+
+    const intervalMs = intervalMinutes * 60 * 1000;
+    let elapsed = 0;
+
+    while (running && elapsed < intervalMs) {
+      await Bun.sleep(1000);
+      elapsed += 1000;
+    }
+  }
+
+  process.off("SIGINT", handleSignal);
+  process.off("SIGTERM", handleSignal);
+
+  console.log(pc.green("\nDaemon stopped."));
+}
+
+async function setupDaemon(profiles: SSOProfile[], settings: AppSettings): Promise<void> {
+  const statuses = await withSpinner(() => checkAllProfiles(profiles), {
+    start: "Checking current status...",
+    success: () => "Status check complete",
+  });
+
+  displayStatusTable(statuses);
+
+  const selected = await selectProfiles(profiles, statuses, settings);
+  if (p.isCancel(selected)) return;
+
+  const interval = await p.select({
+    message: "Select refresh interval",
+    options: REFRESH_INTERVALS,
+    initialValue: settings.defaultInterval,
+  });
+
+  if (p.isCancel(interval)) return;
+
+  await runDaemon(profiles, selected as string[], interval as number, settings);
+}
+
+// ===== MAIN =====
+
+runApp({ name: "🔑 AWS Credentials Manager", color: pc.bgCyan }, async () => {
+  let settings = await loadSettings();
+
+  const profiles = await withSpinner(() => discoverProfiles(), {
+    start: "Discovering SSO profiles...",
+    success: (r) => `Found ${pc.bold(r.length)} SSO profile(s)`,
+  });
+
+  if (profiles.length === 0) {
+    p.note(
+      `No SSO profiles found in ~/.aws/config\n\n` +
+        `Make sure your config has profiles with:\n` +
+        `  - sso_start_url\n` +
+        `  - sso_account_id\n` +
+        `  - sso_role_name\n` +
+        `  - sso_region`,
+      "No Profiles Found"
+    );
+    p.outro(pc.red("Exiting"));
+    process.exit(1);
+  }
+
+  let running = true;
+
+  while (running) {
+    const action = await showMainMenu();
+
+    if (p.isCancel(action) || action === "exit") {
+      running = false;
+      break;
+    }
+
+    switch (action) {
+      case "status": {
+        const statuses = await withSpinner(() => checkAllProfiles(profiles), {
+          start: "Checking credentials status...",
+          success: () => "Status check complete",
+        });
+        displayStatusTable(statuses);
+        break;
+      }
+
+      case "refresh": {
+        const statuses = await withSpinner(() => checkAllProfiles(profiles), {
+          start: "Checking current status...",
+          success: () => "Status loaded",
+        });
+
+        displayStatusTable(statuses);
+
+        const selected = await selectProfiles(profiles, statuses, settings);
+        if (p.isCancel(selected)) break;
+
+        const selectedProfiles = profiles.filter((p) => (selected as string[]).includes(p.name));
+
+        let refreshed = 0;
+        let errors = 0;
+
+        for (const profile of selectedProfiles) {
+          const spinner = p.spinner();
+          spinner.start(`Refreshing ${profile.name}...`);
+
+          const result = await refreshProfile(profile, settings);
+
+          if (result.success) {
+            refreshed++;
+            spinner.stop(pc.green("✓") + pc.bold(` ${profile.name} refreshed`));
+          } else {
+            errors++;
+            spinner.stop(pc.red("✗") + ` ${profile.name}: ${result.error}`);
+          }
+        }
+
+        console.log();
+        p.note(`Refreshed: ${pc.bold(refreshed)}\nErrors: ${pc.bold(errors)}`, "Refresh Complete");
+
+        settings.lastRefresh = new Date().toISOString();
+        await saveSettings(settings);
+        break;
+      }
+
+      case "daemon": {
+        await setupDaemon(profiles, settings);
+        break;
+      }
+
+      case "settings": {
+        settings = await manageSettings(settings, profiles);
+        break;
+      }
+    }
+  }
+
+  goodbye();
+});

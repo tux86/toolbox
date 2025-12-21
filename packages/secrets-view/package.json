@@ -1,0 +1,18 @@
+{
+  "name": "@toolbox/secrets-view",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "secrets-view": "./secrets-view"
+  },
+  "scripts": {
+    "start": "bun run ./secrets-view"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@toolbox/common": "workspace:*"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
