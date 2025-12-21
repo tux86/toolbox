@@ -1,6 +1,6 @@
 {
   "name": "@toolbox/ec2-ssm",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "bin": {
     "ec2-ssm": "./ec2-ssm"

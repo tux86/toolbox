@@ -1,5 +1,12 @@
 # @toolbox/aws-creds
 
+## 1.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`2c88337`](https://github.com/tux86/toolbox/commit/2c883370d704bb5a1d4eac1e49c8c4041062783d)]:
+  - @toolbox/common@1.1.1
+
 ## 1.1.0
 
 ### Minor Changes
