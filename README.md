@@ -16,11 +16,59 @@ A collection of interactive CLI tools built with **Bun** + **TypeScript**, featu
 
 ## 🛠️ Tools
 
-| Tool | Description |
-|------|-------------|
-| 🔑 **[aws-creds](packages/aws-creds/)** | Manage AWS SSO credentials with auto-refresh daemon |
-| 🖥️ **[ec2-ssm](packages/ec2-ssm/)** | Connect to EC2 instances via SSM Session Manager |
-| 🔐 **[secrets-view](packages/secrets-view/)** | Browse and copy AWS Secrets Manager secrets |
+### 🔑 aws-creds
+
+**AWS Credentials Manager** - Interactive credential management for AWS.
+
+- **Multi-method support** - SSO, IAM access keys, assumed roles, MFA sessions
+- **Profile switching** - Quickly switch between AWS profiles
+- **Status dashboard** - View credential validity and expiry times
+- **Auto-refresh daemon** - Background process to keep credentials fresh
+- **Notifications** - Desktop alerts when credentials expire (macOS/Linux)
+
+```bash
+./aws-creds
+# or
+bun run aws-creds
+```
+
+---
+
+### 🖥️ ec2-ssm
+
+**EC2 SSM Shell** - Connect to EC2 instances via AWS Systems Manager.
+
+- **Auto-discovery** - Lists all running instances in current region
+- **SSM filtering** - Only shows instances with SSM agent online
+- **Rich display** - Instance name, ID, private IP, and instance type
+- **Quick connect** - Select and drop directly into a shell session
+- **No SSH keys needed** - Uses SSM Session Manager (no port 22)
+
+```bash
+AWS_PROFILE=my-profile ./ec2-ssm
+# or
+AWS_PROFILE=my-profile bun run ec2-ssm
+```
+
+---
+
+### 🔐 secrets-view
+
+**Secrets Manager Browser** - Browse and copy AWS Secrets Manager secrets.
+
+- **List secrets** - Browse all secrets in current region
+- **View values** - Display secret content with JSON pretty-printing
+- **Copy to clipboard** - Copy entire secret or specific JSON fields
+- **Visual feedback** - Spinner and confirmation when copying
+- **Cross-platform** - Works on macOS (pbcopy) and Linux (xclip)
+
+```bash
+AWS_PROFILE=my-profile ./secrets-view
+# or
+AWS_PROFILE=my-profile bun run secrets-view
+```
+
+---
 
 ## 📋 Prerequisites
 
