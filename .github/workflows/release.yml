@@ -53,12 +53,21 @@ jobs:
             short_name=$(echo "$name" | sed 's/@toolbox\///')
             binary="dist/${short_name}"
 
-            echo "Creating release for $tag"
+            echo "Processing release for $tag (binary: $binary)"
 
-            if [ -f "$binary" ]; then
-              gh release create "$tag" "$binary" --generate-notes --title "$tag" || true
+            # Check if release exists
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "Release exists, uploading binary..."
+              if [ -f "$binary" ]; then
+                gh release upload "$tag" "$binary" --clobber
+              fi
             else
-              gh release create "$tag" --generate-notes --title "$tag" || true
+              echo "Creating new release..."
+              if [ -f "$binary" ]; then
+                gh release create "$tag" "$binary" --generate-notes --title "$tag"
+              else
+                gh release create "$tag" --generate-notes --title "$tag"
+              fi
             fi
           done
         env:
