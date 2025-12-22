@@ -1,5 +1,23 @@
 # @toolbox/ec2-ssm
 
+## 3.0.0
+
+### Major Changes
+
+- [`6f3893b`](https://github.com/tux86/toolbox/commit/6f3893ba4fe3f8f057e5b2e86ad94bd02733b4ea) Thanks [@tux86](https://github.com/tux86)! - Rewrite UI with React/Ink framework
+
+  BREAKING CHANGE: Complete rewrite from @clack/prompts to React/Ink
+
+  - Replace @clack/prompts with React + Ink (React for CLI)
+  - Add shared component library with reusable UI components
+  - Add build system for standalone binaries
+  - Add keyboard shortcuts (vim-style j/k navigation)
+
+### Patch Changes
+
+- Updated dependencies [[`6f3893b`](https://github.com/tux86/toolbox/commit/6f3893ba4fe3f8f057e5b2e86ad94bd02733b4ea)]:
+  - @toolbox/common@3.0.0
+
 ## 1.1.1
 
 ### Patch Changes
