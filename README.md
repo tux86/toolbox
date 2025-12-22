@@ -8,7 +8,7 @@ A collection of interactive CLI tools built with **Bun** + **React** + **Ink**, 
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 <p align="center">
-  <img src="demo.gif" alt="Toolbox Demo" width="800">
+  <img src="demo.gif" alt="Toolbox Demo" width="560">
 </p>
 
 ## Features
