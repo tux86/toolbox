@@ -4,12 +4,14 @@ This file provides guidance to Claude Code when working with this package.
 
 ## Project Overview
 
-**🖥️ EC2 SSM Shell** - Interactive TUI for connecting to EC2 instances via AWS SSM Session Manager.
+**EC2 SSM Shell** - Interactive TUI for connecting to EC2 instances via AWS SSM Session Manager.
 
 ## Quick Start
 
 ```bash
-AWS_PROFILE=my-profile ./ec2-ssm
+AWS_PROFILE=my-profile bun run start
+# or after build
+AWS_PROFILE=my-profile ./dist/ec2-ssm
 ```
 
 ## Tech Stack
@@ -17,7 +19,9 @@ AWS_PROFILE=my-profile ./ec2-ssm
 | Tool | Purpose |
 |------|---------|
 | Bun | Runtime (native TypeScript) |
-| @toolbox/common | Shared utilities (prompts, colors, spinners) |
+| React | Component framework |
+| Ink | React renderer for CLI |
+| @toolbox/common | Shared UI components and utilities |
 | @aws-sdk/client-ec2 | List EC2 instances |
 | @aws-sdk/client-ssm | Check SSM agent status |
 
@@ -36,29 +40,29 @@ AWS_PROFILE=my-profile ./ec2-ssm
 
 ## Architecture
 
-Single-file executable using shared components from `@toolbox/common`:
+Single-file React/Ink application using shared components from `@toolbox/common`:
 
 ```
-1. Types (EC2Instance)
-2. Instance discovery (EC2 + SSM status)
-3. SSM session spawner
-4. Formatters
-5. Main entry (runApp wrapper)
+src/index.tsx
+├── Types (EC2Instance)
+├── AWS Operations (listInstances, getSSMStatus)
+├── Hook: useInstances() - Instance discovery with SSM status
+└── Main EC2SSM component
 ```
 
 ## Shared Components Used
 
-```typescript
+```tsx
 import {
-  colors as pc,
-  prompts as p,
-  getAwsEnv,
+  App,
+  renderApp,
+  List,
+  Spinner,
+  StatusMessage,
+  IdentityCard,
+  ACTIONS,
+  useIdentity,
   getAwsClientConfig,
-  fetchAndDisplayIdentity,
-  withSpinner,
-  selectFromList,
-  runApp,
-  goodbye,
 } from "@toolbox/common";
 ```
 
@@ -68,3 +72,12 @@ import {
 |----------|---------|
 | `AWS_PROFILE` | AWS profile to use |
 | `AWS_REGION` | AWS region (or AWS_DEFAULT_REGION) |
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` or `j/k` | Navigate instances |
+| `Enter` | Connect to instance |
+| `r` | Refresh instance list |
+| `q` | Quit |

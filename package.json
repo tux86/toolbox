@@ -9,6 +9,10 @@
     "aws-creds": "bun run --cwd packages/aws-creds start",
     "ec2-ssm": "bun run --cwd packages/ec2-ssm start",
     "secrets-view": "bun run --cwd packages/secrets-view start",
+    "build": "bun run build:aws-creds && bun run build:ec2-ssm && bun run build:secrets-view",
+    "build:aws-creds": "bun run --cwd packages/aws-creds build",
+    "build:ec2-ssm": "bun run --cwd packages/ec2-ssm build",
+    "build:secrets-view": "bun run --cwd packages/secrets-view build",
     "changeset": "changeset",
     "version": "changeset version",
     "prepare": "husky"
@@ -18,6 +22,7 @@
     "@changesets/cli": "^2.29.8",
     "@commitlint/cli": "^20.2.0",
     "@commitlint/config-conventional": "^20.2.0",
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "react-devtools-core": "^7.0.1"
   }
 }

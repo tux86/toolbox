@@ -6,6 +6,8 @@ node_modules/
 # Bun
 bun.lockb
 *.bunx
+*.bun-build
+*-*.bun-build
 
 # IDE
 .idea/
@@ -52,6 +54,7 @@ lerna-debug.log*
 dist/
 build/
 out/
+.bun-build/
 .output/
 *.tsbuildinfo
 

@@ -1,21 +1,25 @@
 {
   "name": "@toolbox/aws-creds",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "type": "module",
   "bin": {
-    "aws-creds": "./aws-creds"
+    "aws-creds": "./src/index.tsx"
   },
   "scripts": {
-    "start": "bun run ./aws-creds"
+    "start": "bun run ./src/index.tsx",
+    "build": "bun build --compile ./src/index.tsx --outfile ../../dist/aws-creds"
   },
   "dependencies": {
     "@aws-sdk/client-sts": "^3.700.0",
     "@aws-sdk/credential-providers": "^3.700.0",
     "@toolbox/common": "workspace:*",
-    "ini": "^5.0.0"
+    "ink": "^6.0.0",
+    "ini": "^5.0.0",
+    "react": "^19.0.0"
   },
   "devDependencies": {
     "@types/ini": "^4.1.1",
+    "@types/react": "^19.0.0",
     "bun-types": "latest"
   }
 }

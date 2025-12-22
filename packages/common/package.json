@@ -1,20 +1,20 @@
 {
   "name": "@toolbox/common",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./aws": "./src/aws.ts",
-    "./ui": "./src/ui.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sts": "^3.700.0",
-    "@clack/prompts": "^0.11.0",
-    "picocolors": "^1.1.1"
+    "ink": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
     "bun-types": "latest"
   }
 }

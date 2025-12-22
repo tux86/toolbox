@@ -1,40 +1,41 @@
-# 🧰 Toolbox
+# Toolbox
 
-A collection of interactive CLI tools built with **Bun** + **TypeScript**, featuring beautiful TUI interfaces powered by [@clack/prompts](https://github.com/natemoo-re/clack).
+A collection of interactive CLI tools built with **Bun** + **React** + **Ink**, featuring modern terminal UI interfaces.
 
 [![CI](https://github.com/tux86/toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/tux86/toolbox/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?logo=bun&logoColor=white)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-## ✨ Features
+## Features
 
-- 🎨 **Beautiful TUI** - Interactive prompts with spinners, colors, and visual feedback
-- ⚡ **Fast** - Built on Bun for lightning-fast startup and execution
-- 📦 **Monorepo** - Organized workspace with shared utilities
-- 🔧 **Extensible** - Easy to add new tools using the common framework
+- **Modern TUI** - React-based terminal UI with Ink (like Claude Code, Gatsby CLI)
+- **Fast** - Built on Bun for lightning-fast startup and execution
+- **Standalone Binaries** - Compile to single executables (~60MB)
+- **Monorepo** - Organized workspace with shared component library
+- **Extensible** - Easy to add new tools using the common framework
 
-## 🛠️ Tools
+## Tools
 
-### 🔑 aws-creds
+### aws-creds
 
-**AWS Credentials Manager** - Interactive credential management for AWS.
+**AWS Credentials Manager** - Interactive credential management for AWS SSO.
 
-- **Multi-method support** - SSO, IAM access keys, assumed roles, MFA sessions
-- **Profile switching** - Quickly switch between AWS profiles
+- **Auto-discovery** - Scans `~/.aws/config` for SSO profiles
 - **Status dashboard** - View credential validity and expiry times
+- **Multi-select refresh** - Refresh multiple profiles at once
 - **Auto-refresh daemon** - Background process to keep credentials fresh
 - **Notifications** - Desktop alerts when credentials expire (macOS/Linux)
 
 ```bash
-./aws-creds
+./dist/aws-creds
 # or
 bun run aws-creds
 ```
 
 ---
 
-### 🖥️ ec2-ssm
+### ec2-ssm
 
 **EC2 SSM Shell** - Connect to EC2 instances via AWS Systems Manager.
 
@@ -45,38 +46,37 @@ bun run aws-creds
 - **No SSH keys needed** - Uses SSM Session Manager (no port 22)
 
 ```bash
-AWS_PROFILE=my-profile ./ec2-ssm
+AWS_PROFILE=my-profile ./dist/ec2-ssm
 # or
 AWS_PROFILE=my-profile bun run ec2-ssm
 ```
 
 ---
 
-### 🔐 secrets-view
+### secrets-view
 
 **Secrets Manager Browser** - Browse and copy AWS Secrets Manager secrets.
 
 - **List secrets** - Browse all secrets in current region
 - **View values** - Display secret content with JSON pretty-printing
-- **Copy to clipboard** - Copy entire secret or specific JSON fields
-- **Visual feedback** - Spinner and confirmation when copying
-- **Cross-platform** - Works on macOS (pbcopy) and Linux (xclip)
+- **Copy to clipboard** - Copy entire secret with visual feedback
+- **Keyboard navigation** - Vim-style keys (j/k) and arrow keys
 
 ```bash
-AWS_PROFILE=my-profile ./secrets-view
+AWS_PROFILE=my-profile ./dist/secrets-view
 # or
 AWS_PROFILE=my-profile bun run secrets-view
 ```
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 - [Bun](https://bun.sh) >= 1.0
 - [AWS CLI v2](https://aws.amazon.com/cli/) with SSM Session Manager plugin (for AWS tools)
 - Valid AWS credentials configured
 
-## 🚀 Installation
+## Installation
 
 ```bash
 # Clone the repository
@@ -87,113 +87,134 @@ cd toolbox
 bun install
 ```
 
-## 📖 Usage
+## Usage
 
-### Run from repository root
+### Development (run from source)
 
 ```bash
-# AWS Credentials Manager
 bun run aws-creds
-
-# EC2 SSM Shell
-AWS_PROFILE=my-profile bun run ec2-ssm
-
-# Secrets Manager Browser
-AWS_PROFILE=my-profile bun run secrets-view
+bun run ec2-ssm
+bun run secrets-view
 ```
 
-### Run directly
+### Build standalone binaries
 
 ```bash
-# Make executable (first time only)
-chmod +x packages/*/$(ls packages/*/package.json | xargs -I{} dirname {} | xargs -I{} basename {})
+# Build all tools
+bun run build
 
-# Run directly
-./packages/aws-creds/aws-creds
-./packages/ec2-ssm/ec2-ssm
-./packages/secrets-view/secrets-view
+# Build individual tools
+bun run build:aws-creds
+bun run build:ec2-ssm
+bun run build:secrets-view
+```
+
+Output binaries in `dist/`:
+```
+dist/
+├── aws-creds      60MB
+├── ec2-ssm        61MB
+└── secrets-view   60MB
+```
+
+### Run binaries
+
+```bash
+./dist/aws-creds
+./dist/ec2-ssm
+./dist/secrets-view
 ```
 
 ### Global installation (optional)
 
 ```bash
-# Link to your path
-ln -s $(pwd)/packages/aws-creds/aws-creds ~/.local/bin/aws-creds
-ln -s $(pwd)/packages/ec2-ssm/ec2-ssm ~/.local/bin/ec2-ssm
-ln -s $(pwd)/packages/secrets-view/secrets-view ~/.local/bin/secrets-view
+# Link binaries to your path
+ln -s $(pwd)/dist/aws-creds ~/.local/bin/aws-creds
+ln -s $(pwd)/dist/ec2-ssm ~/.local/bin/ec2-ssm
+ln -s $(pwd)/dist/secrets-view ~/.local/bin/secrets-view
 ```
 
-## 🎬 Demo
-
-### AWS Credentials Manager
-```
-┌  🔑 AWS Credentials Manager
-│
-◇  Found 5 SSO profile(s)
-│
-◆  What would you like to do?
-│  ● Check credentials status
-│  ○ Refresh credentials
-│  ○ Start auto-refresh daemon
-│  ○ Settings
-│  ○ Exit
-```
-
-### EC2 SSM Shell
-```
-┌  🖥️  EC2 SSM Shell
-│
-●  Account: 123456789012 | Profile: dev | Region: us-east-1
-●  Role: AdminRole
-│
-◇  Found 3 instance(s) with SSM online
-│
-◆  Select an instance to connect:
-│  ● web-server-01            i-0abc123... 10.0.1.10 t3.medium
-│  ○ api-server-01            i-0def456... 10.0.2.20 t3.large
-│  ○ worker-01                i-0ghi789... 10.0.3.30 t3.small
-```
-
-### Secrets View
-```
-┌  🔐 Secrets View
-│
-●  Account: 123456789012 | Profile: dev | Region: us-east-1
-●  Role: AdminRole
-│
-◇  Found 7 secret(s)
-│
-◆  Select a secret:
-│  ● prod/database - PostgreSQL credentials
-│  ○ prod/api-keys - External API keys
-│  ○ dev/database - Development DB
-```
-
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 toolbox/
 ├── packages/
-│   ├── common/          # 📦 Shared utilities
+│   ├── common/              # Shared React/Ink component library
 │   │   └── src/
-│   │       ├── aws.ts   # AWS helpers (identity, config)
-│   │       └── ui.ts    # UI helpers (spinners, prompts)
-│   ├── aws-creds/       # 🔑 AWS SSO credentials manager
-│   ├── ec2-ssm/         # 🖥️ EC2 SSM shell connector
-│   └── secrets-view/    # 🔐 Secrets Manager browser
-├── package.json         # Workspace configuration
+│   │       ├── components/  # UI components (App, List, Card, etc.)
+│   │       ├── hooks/       # React hooks (useIdentity, useCopy)
+│   │       ├── aws.ts       # AWS utilities
+│   │       └── utils.ts     # General utilities
+│   ├── aws-creds/           # AWS SSO credentials manager
+│   ├── ec2-ssm/             # EC2 SSM shell connector
+│   └── secrets-view/        # Secrets Manager browser
+├── dist/                    # Compiled binaries (after build)
+├── package.json             # Workspace configuration
 └── README.md
 ```
 
-## 🤝 Contributing
+## Shared Components (@toolbox/common)
 
-Contributions are welcome! Here's how you can help:
+All tools use these shared React components:
+
+```tsx
+import {
+  // Layout
+  App,                 // Main app wrapper with header + action bar
+  Card,                // Bordered card container
+  Divider,             // Horizontal divider
+
+  // Interactive
+  List,                // Scrollable list with keyboard navigation
+  MultiSelectList,     // Multi-select with checkboxes
+  ActionBar,           // Keyboard shortcut hints
+  ACTIONS,             // Common action presets
+
+  // Feedback
+  Spinner,             // Loading indicator
+  StatusMessage,       // Success/error/warning messages
+  CopyFeedback,        // Copy confirmation display
+
+  // AWS
+  IdentityCard,        // AWS identity display
+
+  // Hooks
+  useIdentity,         // AWS caller identity hook
+  useCopy,             // Clipboard with feedback
+
+  // Utilities
+  getAwsClientConfig,  // AWS SDK config from env
+  copyToClipboard,     // Copy to clipboard
+  formatJson,          // Pretty-print JSON
+} from "@toolbox/common";
+```
+
+## Keyboard Shortcuts
+
+All tools support these common shortcuts:
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` or `j/k` | Navigate |
+| `Enter` | Select |
+| `r` | Refresh |
+| `q` | Quit |
+| `b` | Back |
+| `c` | Copy |
+
+Multi-select lists also support:
+| Key | Action |
+|-----|--------|
+| `Space` | Toggle selection |
+| `a` | Select all/none |
+
+## Contributing
 
 ### Adding a New Tool
 
 1. Create a new package:
    ```bash
-   mkdir -p packages/my-tool
+   mkdir -p packages/my-tool/src
    ```
 
 2. Create `package.json`:
@@ -202,97 +223,72 @@ Contributions are welcome! Here's how you can help:
      "name": "@toolbox/my-tool",
      "version": "1.0.0",
      "type": "module",
+     "bin": { "my-tool": "./src/index.tsx" },
+     "scripts": {
+       "start": "bun run ./src/index.tsx",
+       "build": "bun build --compile ./src/index.tsx --outfile ../../dist/my-tool"
+     },
      "dependencies": {
-       "@toolbox/common": "workspace:*"
+       "@toolbox/common": "workspace:*",
+       "ink": "^6.0.0",
+       "react": "^19.0.0"
      }
    }
    ```
 
-3. Create your tool using shared utilities:
-   ```typescript
+3. Create your tool:
+   ```tsx
    #!/usr/bin/env bun
-   import {
-     runApp,
-     withSpinner,
-     selectFromList,
-     colors as pc,
-   } from "@toolbox/common";
+   import React from "react";
+   import { App, renderApp, List, ACTIONS } from "@toolbox/common";
+   import { useApp } from "ink";
 
-   runApp({ name: "🎯 My Tool", color: pc.bgGreen }, async () => {
-     // Your tool logic here
-   });
+   function MyTool() {
+     const { exit } = useApp();
+
+     return (
+       <App
+         title="My Tool"
+         icon="🎯"
+         color="green"
+         actions={[ACTIONS.navigate, ACTIONS.select, ACTIONS.quit]}
+         onQuit={() => exit()}
+       >
+         {/* Your content */}
+       </App>
+     );
+   }
+
+   renderApp(<MyTool />);
    ```
 
-4. Install dependencies:
+4. Install and run:
    ```bash
    bun install
+   bun run --cwd packages/my-tool start
    ```
 
-### Development Workflow
+### Commits & Releases
 
+**Conventional Commits** (enforced by commitlint):
 ```bash
-# Install dependencies
-bun install
-
-# Run a tool in development
-bun run --cwd packages/my-tool start
-
-# Format code (if prettier is configured)
-bun run format
-
-# Run tests (if configured)
-bun test
+feat(ec2-ssm): add instance filtering
+fix(common): handle empty clipboard
+docs: update README
 ```
 
-### Pull Request Guidelines
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-tool`)
-3. Commit your changes (`git commit -m 'Add amazing tool'`)
-4. Push to the branch (`git push origin feature/amazing-tool`)
-5. Open a Pull Request
-
-## 📦 Shared Components (`@toolbox/common`)
-
-All tools use these shared utilities for consistency:
-
-```typescript
-import {
-  // App wrapper
-  runApp,              // App shell with intro + error handling
-  goodbye,             // Standard exit message
-
-  // Async operations
-  withSpinner,         // Wrap async ops with spinner
-
-  // Selection
-  selectFromList,      // Generic list selector
-
-  // AWS
-  getAwsClientConfig,  // AWS SDK config from env
-  fetchAndDisplayIdentity,  // Show account info
-
-  // Clipboard
-  copyWithFeedback,    // Copy with visual confirmation
-
-  // Formatting
-  formatJson,          // Pretty-print JSON
-  divider,             // Horizontal line
-
-  // Re-exports
-  prompts as p,        // @clack/prompts
-  colors as pc,        // picocolors
-} from "@toolbox/common";
+**Changesets** - After user-facing changes:
+```bash
+bun run changeset
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-- [@clack/prompts](https://github.com/natemoo-re/clack) - Beautiful CLI prompts
-- [picocolors](https://github.com/alexeyraspopov/picocolors) - Terminal colors
+- [Ink](https://github.com/vadimdemedes/ink) - React for CLI
 - [Bun](https://bun.sh) - Fast JavaScript runtime
 
 ---

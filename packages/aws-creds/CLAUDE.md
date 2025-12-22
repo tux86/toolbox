@@ -4,12 +4,14 @@ This file provides guidance to Claude Code when working with this package.
 
 ## Project Overview
 
-**🔑 AWS Credentials Manager** - Interactive TUI for managing AWS SSO credentials.
+**AWS Credentials Manager** - Interactive TUI for managing AWS SSO credentials.
 
 ## Quick Start
 
 ```bash
-./aws-creds
+./src/index.tsx
+# or
+bun run start
 ```
 
 ## Tech Stack
@@ -17,7 +19,9 @@ This file provides guidance to Claude Code when working with this package.
 | Tool | Purpose |
 |------|---------|
 | Bun | Runtime (native TypeScript) |
-| @toolbox/common | Shared utilities (prompts, colors, spinners) |
+| React | Component framework |
+| Ink | React renderer for CLI |
+| @toolbox/common | Shared UI components and utilities |
 | @aws-sdk/client-sts | Token validation |
 | @aws-sdk/credential-providers | SSO credential provider |
 | ini | Parse/write AWS credentials file |
@@ -33,28 +37,55 @@ This file provides guidance to Claude Code when working with this package.
 
 ## Architecture
 
-Single-file executable using shared components from `@toolbox/common`:
+Single-file React/Ink application using shared components from `@toolbox/common`:
 
 ```
-1. Types & Constants
-2. File utilities (parseAwsConfig, writeCredentials)
-3. SSO cache operations
-4. AWS operations (discoverProfiles, checkTokenStatus, refreshProfile)
-5. Notification system
-6. UI components (mainMenu, statusTable, selectProfiles)
-7. Daemon mode
-8. Main entry (runApp wrapper)
+src/index.tsx
+├── Types & Constants
+├── File utilities (parseAwsConfig, writeCredentials, loadSettings, saveSettings)
+├── SSO cache operations
+├── AWS operations (discoverProfiles, checkTokenStatus, refreshProfile)
+├── Notification system
+├── Utility functions (formatExpiry, getStatusColor)
+├── Hooks
+│   ├── useProfiles() - Profile discovery and status checking
+│   └── useSettings() - Settings management
+├── Components
+│   ├── StatusTable - Profile status display
+│   ├── RefreshProgress - Refresh progress with SSO login
+│   └── DaemonView - Auto-refresh daemon
+└── Main AWSCredsManager component
 ```
+
+## Views
+
+| View | Description |
+|------|-------------|
+| menu | Main menu with actions |
+| status | Profile status table |
+| refresh-select | Multi-select profiles to refresh |
+| refresh | Refresh progress display |
+| daemon-select | Select profiles for daemon |
+| daemon-interval | Select refresh interval |
+| daemon-running | Running daemon with countdown |
+| settings | Settings menu |
+| settings-interval | Change default interval |
+| settings-favorites | Select favorite profiles |
 
 ## Shared Components Used
 
-```typescript
+```tsx
 import {
-  colors as pc,
-  prompts as p,
-  runApp,
-  withSpinner,
-  goodbye,
+  App,
+  renderApp,
+  List,
+  MultiSelectList,
+  Card,
+  Spinner,
+  StatusMessage,
+  ACTIONS,
+  type ListItemData,
+  type MultiSelectItemData,
 } from "@toolbox/common";
 ```
 
@@ -66,3 +97,31 @@ import {
 | `~/.aws/credentials` | Write refreshed credentials |
 | `~/.aws/sso/cache/*.json` | Read token expiry times |
 | `~/.aws/credentials-manager.json` | App settings persistence |
+
+## Settings Schema
+
+```typescript
+interface AppSettings {
+  notifications: boolean;      // System notifications on/off
+  defaultInterval: number;     // Default daemon refresh interval (minutes)
+  favoriteProfiles: string[];  // Profiles shown first
+  lastRefresh?: string;        // ISO timestamp of last refresh
+}
+```
+
+## Keyboard Shortcuts
+
+### Main Menu
+- `↑/↓` - Navigate
+- `Enter` - Select
+- `q` - Quit
+
+### Profile Selection
+- `↑/↓` - Navigate
+- `Space` - Toggle selection
+- `a` - Select all/none
+- `Enter` - Confirm
+- `Esc/q` - Cancel
+
+### Daemon Mode
+- `Ctrl+C` - Stop daemon

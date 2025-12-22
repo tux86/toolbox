@@ -4,17 +4,18 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**Toolbox** - A Bun workspace monorepo containing AWS utility tools with interactive TUI.
+**Toolbox** - A Bun workspace monorepo containing AWS utility tools with modern React/Ink terminal UI.
 
 ## Structure
 
 ```
 toolbox/
 ├── packages/
-│   ├── common/          # Shared utilities (AWS, UI helpers)
-│   ├── aws-creds/       # 🔑 AWS SSO credentials manager
-│   ├── ec2-ssm/         # 🖥️ EC2 SSM shell connector
-│   └── secrets-view/    # 🔐 Secrets Manager browser
+│   ├── common/          # Shared React/Ink component library
+│   ├── aws-creds/       # AWS SSO credentials manager
+│   ├── ec2-ssm/         # EC2 SSM shell connector
+│   └── secrets-view/    # Secrets Manager browser
+├── dist/                # Compiled binaries (after build)
 └── package.json         # Workspace root
 ```
 
@@ -24,65 +25,104 @@ toolbox/
 |------|---------|
 | Bun | Runtime & package manager |
 | TypeScript | Language (native Bun support) |
-| @toolbox/common | Shared utilities across all tools |
-| @clack/prompts | Interactive TUI prompts |
-| picocolors | Terminal colors |
+| React | Component framework |
+| Ink | React renderer for CLI |
+| @toolbox/common | Shared UI components and utilities |
 
-## Development Commands
+## Commands
 
 ```bash
-bun install                    # Install all workspace dependencies
-bun run aws-creds              # Run 🔑 aws-creds
-bun run ec2-ssm                # Run 🖥️ ec2-ssm
-bun run secrets-view           # Run 🔐 secrets-view
+# Development
+bun install              # Install dependencies
+bun run aws-creds        # Run aws-creds
+bun run ec2-ssm          # Run ec2-ssm
+bun run secrets-view     # Run secrets-view
+
+# Build standalone binaries
+bun run build            # Build all to dist/
+bun run build:aws-creds  # Build aws-creds
+bun run build:ec2-ssm    # Build ec2-ssm
+bun run build:secrets-view # Build secrets-view
 ```
 
 ## Adding a New Package
 
-1. Create directory: `packages/<package-name>/`
-2. Add `package.json` with:
+1. Create directory: `packages/<package-name>/src/`
+2. Add `package.json`:
    ```json
    {
      "name": "@toolbox/<package-name>",
+     "version": "1.0.0",
+     "type": "module",
+     "bin": { "<package-name>": "./src/index.tsx" },
+     "scripts": {
+       "start": "bun run ./src/index.tsx",
+       "build": "bun build --compile ./src/index.tsx --outfile ../../dist/<package-name>"
+     },
      "dependencies": {
-       "@toolbox/common": "workspace:*"
+       "@toolbox/common": "workspace:*",
+       "ink": "^6.0.0",
+       "react": "^19.0.0"
      }
    }
    ```
-3. Add `CLAUDE.md` with project-specific instructions
-4. Use shared utilities:
-   ```typescript
-   import { runApp, withSpinner, colors as pc } from "@toolbox/common";
+3. Create `src/index.tsx`:
+   ```tsx
+   #!/usr/bin/env bun
+   import React from "react";
+   import { App, renderApp, ACTIONS } from "@toolbox/common";
+   import { useApp } from "ink";
 
-   runApp({ name: "🎯 My Tool", color: pc.bgGreen }, async () => {
-     // tool logic
-   });
+   function MyTool() {
+     const { exit } = useApp();
+     return (
+       <App
+         title="My Tool"
+         icon="🎯"
+         color="cyan"
+         actions={[ACTIONS.quit]}
+         onQuit={() => exit()}
+       >
+         {/* Content */}
+       </App>
+     );
+   }
+
+   renderApp(<MyTool />);
    ```
-5. Run `bun install` to link the workspace
+4. Add `CLAUDE.md` with tool-specific instructions
+5. Run `bun install` to link workspace
 
 ## Packages
 
-| Package | Icon | Description |
-|---------|------|-------------|
-| [@toolbox/common](packages/common/) | 📦 | Shared utilities (AWS identity, UI helpers, clipboard) |
-| [@toolbox/aws-creds](packages/aws-creds/) | 🔑 | Manage AWS SSO credentials |
-| [@toolbox/ec2-ssm](packages/ec2-ssm/) | 🖥️ | Connect to EC2 instances via SSM |
-| [@toolbox/secrets-view](packages/secrets-view/) | 🔐 | Browse AWS Secrets Manager |
+| Package | Description |
+|---------|-------------|
+| [@toolbox/common](packages/common/) | Shared React/Ink components and hooks |
+| [@toolbox/aws-creds](packages/aws-creds/) | AWS SSO credentials manager |
+| [@toolbox/ec2-ssm](packages/ec2-ssm/) | EC2 SSM shell connector |
+| [@toolbox/secrets-view](packages/secrets-view/) | Secrets Manager browser |
 
 ## Shared Components (@toolbox/common)
 
-All tools use these shared utilities:
-
-```typescript
+```tsx
 import {
-  runApp,              // App wrapper with intro + error handling
-  withSpinner,         // Async operations with spinner
-  selectFromList,      // Generic list selector
-  copyWithFeedback,    // Copy with visual feedback
-  fetchAndDisplayIdentity,  // Show AWS account info
-  goodbye,             // Standard exit message
-  prompts as p,        // @clack/prompts
-  colors as pc,        // picocolors
+  // Layout
+  App, renderApp, Card, Divider,
+
+  // Interactive
+  List, MultiSelectList, ActionBar, ACTIONS,
+
+  // Feedback
+  Spinner, StatusMessage, CopyFeedback,
+
+  // AWS
+  IdentityCard,
+
+  // Hooks
+  useIdentity, useCopy,
+
+  // Utilities
+  getAwsClientConfig, copyToClipboard, formatJson,
 } from "@toolbox/common";
 ```
 

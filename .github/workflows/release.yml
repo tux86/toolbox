@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Build binaries
+        run: bun run build
+
       - name: Create Release Pull Request or Tag
         id: changesets
         uses: changesets/action@v1
@@ -38,13 +41,25 @@ jobs:
         if: steps.changesets.outputs.published == 'true'
         run: git push --follow-tags
 
-      - name: Create GitHub Releases
+      - name: Create GitHub Releases with Binaries
         if: steps.changesets.outputs.published == 'true'
         run: |
-          for pkg in $(echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "\(.name)@\(.version)"'); do
-            tag="${pkg}"
+          for pkg in $(echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | @base64'); do
+            name=$(echo "$pkg" | base64 -d | jq -r '.name')
+            version=$(echo "$pkg" | base64 -d | jq -r '.version')
+            tag="${name}@${version}"
+
+            # Extract package short name (e.g., @toolbox/aws-creds -> aws-creds)
+            short_name=$(echo "$name" | sed 's/@toolbox\///')
+            binary="dist/${short_name}"
+
             echo "Creating release for $tag"
-            gh release create "$tag" --generate-notes --title "$tag" || true
+
+            if [ -f "$binary" ]; then
+              gh release create "$tag" "$binary" --generate-notes --title "$tag" || true
+            else
+              gh release create "$tag" --generate-notes --title "$tag" || true
+            fi
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
