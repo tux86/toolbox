@@ -7,6 +7,10 @@ A collection of interactive CLI tools built with **Bun** + **React** + **Ink**, 
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?logo=bun&logoColor=white)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
+<p align="center">
+  <img src="demo.gif" alt="Toolbox Demo" width="800">
+</p>
+
 ## Features
 
 - **Modern TUI** - React-based terminal UI with Ink (like Claude Code, Gatsby CLI)
@@ -70,6 +74,24 @@ AWS_PROFILE=my-profile bun run secrets-view
 
 ---
 
+### proc-manager
+
+**Process Manager** - Interactive process and port management.
+
+- **Combined view** - Processes with CPU%, memory, user, and listening ports
+- **Ports view** - All listening TCP ports with associated processes
+- **Kill options** - SIGTERM (graceful) or SIGKILL (force)
+- **Auto-refresh** - Real-time updates every 2 seconds
+- **Filter** - Search by name, PID, port, or user
+
+```bash
+./dist/proc-manager
+# or
+bun run proc-manager
+```
+
+---
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) >= 1.0
@@ -95,6 +117,7 @@ bun install
 bun run aws-creds
 bun run ec2-ssm
 bun run secrets-view
+bun run proc-manager
 ```
 
 ### Build standalone binaries
@@ -107,6 +130,7 @@ bun run build
 bun run build:aws-creds
 bun run build:ec2-ssm
 bun run build:secrets-view
+bun run build:proc-manager
 ```
 
 Output binaries in `dist/`:
@@ -114,7 +138,8 @@ Output binaries in `dist/`:
 dist/
 ├── aws-creds      60MB
 ├── ec2-ssm        61MB
-└── secrets-view   60MB
+├── secrets-view   60MB
+└── proc-manager   60MB
 ```
 
 ### Run binaries
@@ -123,6 +148,7 @@ dist/
 ./dist/aws-creds
 ./dist/ec2-ssm
 ./dist/secrets-view
+./dist/proc-manager
 ```
 
 ### Global installation (optional)
@@ -132,6 +158,7 @@ dist/
 ln -s $(pwd)/dist/aws-creds ~/.local/bin/aws-creds
 ln -s $(pwd)/dist/ec2-ssm ~/.local/bin/ec2-ssm
 ln -s $(pwd)/dist/secrets-view ~/.local/bin/secrets-view
+ln -s $(pwd)/dist/proc-manager ~/.local/bin/proc-manager
 ```
 
 ## Project Structure
@@ -147,7 +174,8 @@ toolbox/
 │   │       └── utils.ts     # General utilities
 │   ├── aws-creds/           # AWS SSO credentials manager
 │   ├── ec2-ssm/             # EC2 SSM shell connector
-│   └── secrets-view/        # Secrets Manager browser
+│   ├── secrets-view/        # Secrets Manager browser
+│   └── proc-manager/        # Process and port manager
 ├── dist/                    # Compiled binaries (after build)
 ├── package.json             # Workspace configuration
 └── README.md
