@@ -15,7 +15,7 @@
     },
     "packages/aws-creds": {
       "name": "@toolbox/aws-creds",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "bin": {
         "aws-creds": "./src/index.tsx",
       },
@@ -35,7 +35,7 @@
     },
     "packages/common": {
       "name": "@toolbox/common",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "dependencies": {
         "@aws-sdk/client-sts": "^3.700.0",
         "ink": "^6.0.0",
@@ -49,7 +49,7 @@
     },
     "packages/ec2-ssm": {
       "name": "@toolbox/ec2-ssm",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "bin": {
         "ec2-ssm": "./src/index.tsx",
       },
@@ -65,9 +65,25 @@
         "bun-types": "latest",
       },
     },
+    "packages/proc-manager": {
+      "name": "@toolbox/proc-manager",
+      "version": "1.0.0",
+      "bin": {
+        "proc-manager": "./src/index.tsx",
+      },
+      "dependencies": {
+        "@toolbox/common": "workspace:*",
+        "ink": "^6.0.0",
+        "react": "^19.0.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
+        "bun-types": "latest",
+      },
+    },
     "packages/secrets-view": {
       "name": "@toolbox/secrets-view",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "bin": {
         "secrets-view": "./src/index.tsx",
       },
@@ -337,6 +353,8 @@
     "@toolbox/common": ["@toolbox/common@workspace:packages/common"],
 
     "@toolbox/ec2-ssm": ["@toolbox/ec2-ssm@workspace:packages/ec2-ssm"],
+
+    "@toolbox/proc-manager": ["@toolbox/proc-manager@workspace:packages/proc-manager"],
 
     "@toolbox/secrets-view": ["@toolbox/secrets-view@workspace:packages/secrets-view"],
 

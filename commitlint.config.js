@@ -25,6 +25,7 @@ export default {
         'aws-creds',
         'ec2-ssm',
         'secrets-view',
+        'proc-manager',
         'common',
         'deps',
       ],

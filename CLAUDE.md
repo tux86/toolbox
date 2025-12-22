@@ -14,7 +14,8 @@ toolbox/
 │   ├── common/          # Shared React/Ink component library
 │   ├── aws-creds/       # AWS SSO credentials manager
 │   ├── ec2-ssm/         # EC2 SSM shell connector
-│   └── secrets-view/    # Secrets Manager browser
+│   ├── secrets-view/    # Secrets Manager browser
+│   └── proc-manager/    # Process and port manager
 ├── dist/                # Compiled binaries (after build)
 └── package.json         # Workspace root
 ```
@@ -37,12 +38,14 @@ bun install              # Install dependencies
 bun run aws-creds        # Run aws-creds
 bun run ec2-ssm          # Run ec2-ssm
 bun run secrets-view     # Run secrets-view
+bun run proc-manager     # Run proc-manager
 
 # Build standalone binaries
 bun run build            # Build all to dist/
 bun run build:aws-creds  # Build aws-creds
 bun run build:ec2-ssm    # Build ec2-ssm
 bun run build:secrets-view # Build secrets-view
+bun run build:proc-manager # Build proc-manager
 ```
 
 ## Adding a New Package
@@ -101,6 +104,7 @@ bun run build:secrets-view # Build secrets-view
 | [@toolbox/aws-creds](packages/aws-creds/) | AWS SSO credentials manager |
 | [@toolbox/ec2-ssm](packages/ec2-ssm/) | EC2 SSM shell connector |
 | [@toolbox/secrets-view](packages/secrets-view/) | Secrets Manager browser |
+| [@toolbox/proc-manager](packages/proc-manager/) | Process and port manager |
 
 ## Shared Components (@toolbox/common)
 
@@ -138,7 +142,7 @@ build(deps): upgrade aws-sdk             # Dependencies
 chore: cleanup                           # Maintenance
 ```
 
-**Allowed scopes:** `aws-creds`, `ec2-ssm`, `secrets-view`, `common`, `deps`
+**Allowed scopes:** `aws-creds`, `ec2-ssm`, `secrets-view`, `proc-manager`, `common`, `deps`
 
 ### Changesets (IMPORTANT)
 

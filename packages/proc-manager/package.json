@@ -1,0 +1,21 @@
+{
+  "name": "@toolbox/proc-manager",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "proc-manager": "./src/index.tsx"
+  },
+  "scripts": {
+    "start": "bun run ./src/index.tsx",
+    "build": "bun build --compile ./src/index.tsx --outfile ../../dist/proc-manager"
+  },
+  "dependencies": {
+    "@toolbox/common": "workspace:*",
+    "ink": "^6.0.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "bun-types": "latest"
+  }
+}
