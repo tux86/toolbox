@@ -685,24 +685,19 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
   const errorCount = results.filter((r) => !r.success).length;
 
   return (
-    <Box flexDirection="column">
-      <Card title="Auto-Refresh Daemon">
-        <Box flexDirection="column">
-          <Text><Text dimColor>Profiles:</Text> {profiles.map(p => p.name).join(", ")}</Text>
-          <Text><Text dimColor>Interval:</Text> {intervalMinutes} minutes</Text>
-          {lastRefresh && <Text><Text dimColor>Last refresh:</Text> {lastRefresh.toLocaleTimeString()}</Text>}
-          {nextRefresh && !refreshing && <Text><Text dimColor>Next refresh:</Text> {nextRefresh.toLocaleTimeString()}</Text>}
-        </Box>
-      </Card>
-
-      {refreshing ? (
-        <Spinner label="Refreshing credentials..." />
-      ) : results.length > 0 && (
-        <StatusMessage type={errorCount > 0 ? "warning" : "success"}>
-          {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}
-        </StatusMessage>
-      )}
-    </Box>
+    <Card title="Auto-Refresh Daemon">
+      <Box flexDirection="column">
+        <Text><Text dimColor>Profiles:</Text> {profiles.map(p => p.name).join(", ")}</Text>
+        <Text><Text dimColor>Interval:</Text> {intervalMinutes} min</Text>
+        {lastRefresh && <Text><Text dimColor>Last:</Text> {lastRefresh.toLocaleTimeString()}</Text>}
+        {nextRefresh && !refreshing && <Text><Text dimColor>Next:</Text> {nextRefresh.toLocaleTimeString()}</Text>}
+        {refreshing ? (
+          <Spinner label="Refreshing..." />
+        ) : results.length > 0 && (
+          <Text color={errorCount > 0 ? "yellow" : "green"}>✓ {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}</Text>
+        )}
+      </Box>
+    </Card>
   );
 }
 

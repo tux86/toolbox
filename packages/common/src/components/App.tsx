@@ -39,16 +39,14 @@ export function App({
       </Box>
 
       {/* Content */}
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column">
         {children}
       </Box>
 
       {/* Action Bar */}
       {actions && actions.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Box marginBottom={1}>
-            <Text dimColor>{"─".repeat(60)}</Text>
-          </Box>
+          <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} borderColor="gray" />
           <ActionBar actions={actions} />
         </Box>
       )}
