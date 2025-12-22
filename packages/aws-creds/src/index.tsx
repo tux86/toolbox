@@ -593,6 +593,15 @@ function RefreshProgress({ profiles, settings, onComplete, onBack }: RefreshProg
             Refreshed {successCount} profile(s){errorCount > 0 ? `, ${errorCount} error(s)` : ""}
           </StatusMessage>
           <Box marginTop={1}>
+            <Text dimColor>Profiles: </Text>
+            <Text>{results.filter(r => r.success).map(r => r.name).join(", ")}</Text>
+          </Box>
+          <Box>
+            <Text dimColor>Refresh interval: </Text>
+            <Text color="cyan">{settings.defaultInterval} min</Text>
+            <Text dimColor> (change in Settings)</Text>
+          </Box>
+          <Box marginTop={1}>
             <Text dimColor>Press b to go back</Text>
           </Box>
         </Box>
@@ -627,7 +636,7 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
   const { exit } = useApp();
 
   useInput((input, key) => {
-    if (key.ctrl && input === "c") {
+    if ((key.ctrl && input === "c") || input === "q") {
       onStop();
     }
   });
@@ -678,39 +687,21 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
   return (
     <Box flexDirection="column">
       <Card title="Auto-Refresh Daemon">
-        <Box flexDirection="column" gap={1}>
-          <Text>
-            <Text dimColor>Profiles:</Text> {profiles.length}
-          </Text>
-          <Text>
-            <Text dimColor>Interval:</Text> {intervalMinutes} minutes
-          </Text>
-          {lastRefresh && (
-            <Text>
-              <Text dimColor>Last refresh:</Text> {lastRefresh.toLocaleTimeString()}
-            </Text>
-          )}
-          {nextRefresh && !refreshing && (
-            <Text>
-              <Text dimColor>Next refresh:</Text> {nextRefresh.toLocaleTimeString()}
-            </Text>
-          )}
+        <Box flexDirection="column">
+          <Text><Text dimColor>Profiles:</Text> {profiles.map(p => p.name).join(", ")}</Text>
+          <Text><Text dimColor>Interval:</Text> {intervalMinutes} minutes</Text>
+          {lastRefresh && <Text><Text dimColor>Last refresh:</Text> {lastRefresh.toLocaleTimeString()}</Text>}
+          {nextRefresh && !refreshing && <Text><Text dimColor>Next refresh:</Text> {nextRefresh.toLocaleTimeString()}</Text>}
         </Box>
       </Card>
 
       {refreshing ? (
         <Spinner label="Refreshing credentials..." />
       ) : results.length > 0 && (
-        <Box marginTop={1}>
-          <StatusMessage type={errorCount > 0 ? "warning" : "success"}>
-            {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}
-          </StatusMessage>
-        </Box>
+        <StatusMessage type={errorCount > 0 ? "warning" : "success"}>
+          {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}
+        </StatusMessage>
       )}
-
-      <Box marginTop={1}>
-        <Text dimColor>Press Ctrl+C to stop daemon</Text>
-      </Box>
     </Box>
   );
 }
@@ -1062,7 +1053,7 @@ function AWSCredsManager() {
           ACTIONS.back,
         ];
       case "daemon-running":
-        return [{ keys: "^C", label: "Stop" }];
+        return [{ keys: "^C", label: "Stop" }, ACTIONS.quit];
       default:
         return [ACTIONS.navigate, ACTIONS.select, ACTIONS.back];
     }
