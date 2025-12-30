@@ -5,11 +5,14 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
-import { fromSSO } from "@aws-sdk/credential-providers";
+import {
+  SSOOIDCClient,
+  RegisterClientCommand,
+  StartDeviceAuthorizationCommand,
+  CreateTokenCommand,
+} from "@aws-sdk/client-sso-oidc";
+import { SSOClient, GetRoleCredentialsCommand } from "@aws-sdk/client-sso";
 import { parse as parseIni, stringify as stringifyIni } from "ini";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
 import {
   App,
   renderApp,
@@ -19,6 +22,7 @@ import {
   StatusMessage,
   MultiSelectList,
   ACTIONS,
+  useCopy,
   type ListItemData,
   type MultiSelectItemData,
 } from "@toolbox/common";
@@ -43,9 +47,6 @@ interface ProfileStatus {
   profile: SSOProfile;
   status: CredentialStatus;
   expiresAt?: Date;
-  accountId?: string;
-  arn?: string;
-  error?: string;
 }
 
 interface AWSCredentials {
@@ -53,6 +54,16 @@ interface AWSCredentials {
   secretAccessKey: string;
   sessionToken?: string;
   expiration?: Date;
+}
+
+interface DeviceAuthInfo {
+  verificationUri: string;
+  userCode: string;
+  deviceCode: string;
+  clientId: string;
+  clientSecret: string;
+  expiresAt: Date;
+  interval: number;
 }
 
 interface AppSettings {
@@ -75,12 +86,10 @@ type ViewState =
   | "status"
   | "refresh"
   | "refresh-select"
-  | "daemon"
   | "daemon-select"
   | "daemon-interval"
   | "daemon-running"
   | "settings"
-  | "settings-notifications"
   | "settings-interval"
   | "settings-favorites";
 
@@ -88,11 +97,12 @@ type ViewState =
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AWS_DIR = join(homedir(), ".aws");
-const CONFIG_PATH = join(AWS_DIR, "config");
-const CREDENTIALS_PATH = join(AWS_DIR, "credentials");
-const SSO_CACHE_DIR = join(AWS_DIR, "sso", "cache");
-const SETTINGS_PATH = join(AWS_DIR, "credentials-manager.json");
+const HOME = process.env.HOME || process.env.USERPROFILE || "";
+const AWS_DIR = `${HOME}/.aws`;
+const CONFIG_PATH = `${AWS_DIR}/config`;
+const CREDENTIALS_PATH = `${AWS_DIR}/credentials`;
+const SSO_CACHE_DIR = `${AWS_DIR}/sso/cache`;
+const SETTINGS_PATH = `${AWS_DIR}/credentials-manager.json`;
 
 const DEFAULT_SETTINGS: AppSettings = {
   notifications: true,
@@ -111,18 +121,9 @@ const REFRESH_INTERVALS = [
 // File Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function parseAwsConfig(): Promise<ParsedConfig> {
+async function parseIniFile(path: string): Promise<ParsedConfig> {
   try {
-    const content = await Bun.file(CONFIG_PATH).text();
-    return parseIni(content);
-  } catch {
-    return {};
-  }
-}
-
-async function parseCredentialsFile(): Promise<ParsedConfig> {
-  try {
-    const content = await Bun.file(CREDENTIALS_PATH).text();
+    const content = await Bun.file(path).text();
     return parseIni(content);
   } catch {
     return {};
@@ -130,7 +131,7 @@ async function parseCredentialsFile(): Promise<ParsedConfig> {
 }
 
 async function writeCredentials(profileName: string, credentials: AWSCredentials): Promise<void> {
-  const existing = await parseCredentialsFile();
+  const existing = await parseIniFile(CREDENTIALS_PATH);
 
   existing[profileName] = {
     aws_access_key_id: credentials.accessKeyId,
@@ -158,25 +159,26 @@ async function saveSettings(settings: AppSettings): Promise<void> {
 // SSO Cache
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function findSSOTokenExpiry(startUrl: string): Promise<Date | null> {
-  try {
-    const glob = new Bun.Glob("*.json");
-    let latestExpiry: Date | null = null;
+interface CachedToken {
+  accessToken: string;
+  expiresAt: Date;
+}
 
-    for await (const file of glob.scan(SSO_CACHE_DIR)) {
-      try {
-        const content = await Bun.file(join(SSO_CACHE_DIR, file)).json();
-        if (content.startUrl === startUrl && content.expiresAt) {
-          const expiresAt = new Date(content.expiresAt);
-          if (!latestExpiry || expiresAt > latestExpiry) {
-            latestExpiry = expiresAt;
-          }
-        }
-      } catch {
-        // Skip invalid cache files
-      }
+async function findCachedToken(profile: SSOProfile): Promise<CachedToken | null> {
+  try {
+    const crypto = await import("crypto");
+    const cacheKey = profile.ssoSession ?? profile.ssoStartUrl;
+    const hash = crypto.createHash("sha1").update(cacheKey).digest("hex");
+    const cacheFile = `${SSO_CACHE_DIR}/${hash}.json`;
+
+    const content = await Bun.file(cacheFile).json();
+    if (content.accessToken && content.expiresAt) {
+      return {
+        accessToken: content.accessToken,
+        expiresAt: new Date(content.expiresAt),
+      };
     }
-    return latestExpiry;
+    return null;
   } catch {
     return null;
   }
@@ -187,7 +189,7 @@ async function findSSOTokenExpiry(startUrl: string): Promise<Date | null> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function discoverProfiles(): Promise<SSOProfile[]> {
-  const config = await parseAwsConfig();
+  const config = await parseIniFile(CONFIG_PATH);
   const profiles: SSOProfile[] = [];
   const ssoSessions: Map<string, ConfigSection> = new Map();
 
@@ -231,94 +233,223 @@ async function discoverProfiles(): Promise<SSOProfile[]> {
 }
 
 async function checkTokenStatus(profile: SSOProfile): Promise<ProfileStatus> {
-  try {
-    const client = new STSClient({
-      region: profile.region || profile.ssoRegion,
-      credentials: fromSSO({ profile: profile.name }),
-    });
+  const cachedToken = await findCachedToken(profile);
 
-    const response = await client.send(new GetCallerIdentityCommand({}));
-    const expiresAt = await findSSOTokenExpiry(profile.ssoStartUrl);
-
-    return {
-      profile,
-      status: "valid",
-      accountId: response.Account,
-      arn: response.Arn,
-      expiresAt: expiresAt || undefined,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message.toLowerCase() : "";
-
-    if (
-      errorMessage.includes("expired") ||
-      errorMessage.includes("invalid") ||
-      errorMessage.includes("token") ||
-      errorMessage.includes("sso") ||
-      errorMessage.includes("refresh") ||
-      errorMessage.includes("unauthorized")
-    ) {
-      return { profile, status: "expired", error: "Token expired or invalid" };
-    }
-
-    return {
-      profile,
-      status: "error",
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
+  if (!cachedToken || cachedToken.expiresAt <= new Date()) {
+    return { profile, status: "expired" };
   }
+
+  return { profile, status: "valid", expiresAt: cachedToken.expiresAt };
 }
 
 async function checkAllProfiles(profiles: SSOProfile[]): Promise<ProfileStatus[]> {
   return Promise.all(profiles.map((profile) => checkTokenStatus(profile)));
 }
 
-async function triggerSSOLogin(profile: SSOProfile): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["aws", "sso", "login", "--profile", profile.name], {
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: "inherit",
-    });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// SSO OIDC Device Authorization Flow
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function getCredentials(profile: SSOProfile): Promise<AWSCredentials | null> {
+async function startDeviceAuthorization(profile: SSOProfile): Promise<DeviceAuthInfo | null> {
   try {
-    const credentialProvider = fromSSO({ profile: profile.name });
-    const credentials = await credentialProvider();
+    const client = new SSOOIDCClient({ region: profile.ssoRegion });
+
+    // Register client
+    const registerResponse = await client.send(
+      new RegisterClientCommand({
+        clientName: "aws-creds-toolbox",
+        clientType: "public",
+      })
+    );
+
+    if (!registerResponse.clientId || !registerResponse.clientSecret) {
+      return null;
+    }
+
+    // Start device authorization
+    const authResponse = await client.send(
+      new StartDeviceAuthorizationCommand({
+        clientId: registerResponse.clientId,
+        clientSecret: registerResponse.clientSecret,
+        startUrl: profile.ssoStartUrl,
+      })
+    );
+
+    if (!authResponse.verificationUriComplete || !authResponse.deviceCode || !authResponse.userCode) {
+      return null;
+    }
 
     return {
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey,
-      sessionToken: credentials.sessionToken,
-      expiration: credentials.expiration,
+      verificationUri: authResponse.verificationUriComplete,
+      userCode: authResponse.userCode,
+      deviceCode: authResponse.deviceCode,
+      clientId: registerResponse.clientId,
+      clientSecret: registerResponse.clientSecret,
+      expiresAt: new Date(Date.now() + (authResponse.expiresIn || 600) * 1000),
+      interval: authResponse.interval || 5,
     };
   } catch {
     return null;
   }
 }
 
-async function refreshProfile(
-  profile: SSOProfile,
-  settings: AppSettings
-): Promise<{ success: boolean; error?: string; needsLogin?: boolean }> {
-  const status = await checkTokenStatus(profile);
+interface TokenInfo {
+  accessToken: string;
+  expiresAt: Date;
+}
 
-  if (status.status === "valid") {
-    const credentials = await getCredentials(profile);
-    if (credentials) {
-      await writeCredentials(profile.name, credentials);
-      return { success: true };
+async function saveSSOTokenToCache(profile: SSOProfile, tokenInfo: TokenInfo): Promise<void> {
+  try {
+    // Create cache directory if it doesn't exist
+    const { mkdir, chmod } = await import("fs/promises");
+    await mkdir(SSO_CACHE_DIR, { recursive: true });
+
+    const crypto = await import("crypto");
+
+    // For sso_session profiles, cache file is named after the session name
+    // For legacy profiles, cache file is named after the startUrl hash
+    const cacheKey = profile.ssoSession ?? profile.ssoStartUrl;
+    const hash = crypto.createHash("sha1").update(cacheKey).digest("hex");
+    const cacheFile = `${SSO_CACHE_DIR}/${hash}.json`;
+
+    // Write token in AWS CLI compatible format
+    const cacheData = {
+      startUrl: profile.ssoStartUrl,
+      region: profile.ssoRegion,
+      accessToken: tokenInfo.accessToken,
+      expiresAt: tokenInfo.expiresAt.toISOString(),
+    };
+
+    await Bun.write(cacheFile, JSON.stringify(cacheData, null, 2));
+    // Set secure permissions (600) like AWS CLI does
+    await chmod(cacheFile, 0o600);
+  } catch {
+    // Silently fail - credentials will still work via credentials file
+  }
+}
+
+async function pollForToken(
+  profile: SSOProfile,
+  deviceAuth: DeviceAuthInfo
+): Promise<TokenInfo | null> {
+  const client = new SSOOIDCClient({ region: profile.ssoRegion });
+  const startTime = Date.now();
+  const maxWaitMs = (deviceAuth.expiresAt.getTime() - Date.now());
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const tokenResponse = await client.send(
+        new CreateTokenCommand({
+          clientId: deviceAuth.clientId,
+          clientSecret: deviceAuth.clientSecret,
+          grantType: "urn:ietf:params:oauth:grant-type:device_code",
+          deviceCode: deviceAuth.deviceCode,
+        })
+      );
+
+      if (tokenResponse.accessToken) {
+        const expiresAt = new Date(Date.now() + (tokenResponse.expiresIn || 28800) * 1000);
+        return {
+          accessToken: tokenResponse.accessToken,
+          expiresAt,
+        };
+      }
+    } catch (error: unknown) {
+      const err = error as { name?: string };
+      if (err.name === "AuthorizationPendingException") {
+        // User hasn't authorized yet, keep polling
+        await new Promise((resolve) => setTimeout(resolve, deviceAuth.interval * 1000));
+        continue;
+      }
+      if (err.name === "SlowDownException") {
+        // Need to slow down polling
+        await new Promise((resolve) => setTimeout(resolve, (deviceAuth.interval + 5) * 1000));
+        continue;
+      }
+      if (err.name === "ExpiredTokenException" || err.name === "AccessDeniedException") {
+        return null;
+      }
+      // Unknown error, stop polling
+      return null;
     }
-    return { success: false, error: "Failed to retrieve credentials" };
+  }
+  return null;
+}
+
+async function getCredentialsWithToken(
+  profile: SSOProfile,
+  accessToken: string
+): Promise<AWSCredentials | null> {
+  try {
+    const client = new SSOClient({ region: profile.ssoRegion });
+    const response = await client.send(
+      new GetRoleCredentialsCommand({
+        accountId: profile.ssoAccountId,
+        roleName: profile.ssoRoleName,
+        accessToken,
+      })
+    );
+
+    if (!response.roleCredentials) {
+      return null;
+    }
+
+    return {
+      accessKeyId: response.roleCredentials.accessKeyId!,
+      secretAccessKey: response.roleCredentials.secretAccessKey!,
+      sessionToken: response.roleCredentials.sessionToken,
+      expiration: response.roleCredentials.expiration
+        ? new Date(response.roleCredentials.expiration)
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function openBrowser(url: string): void {
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  Bun.spawn([cmd, url], { stdout: "ignore", stderr: "ignore" });
+}
+
+async function performSSOLoginFlow(
+  profile: SSOProfile,
+  deviceAuth: DeviceAuthInfo
+): Promise<{ success: boolean; error?: string }> {
+  const tokenInfo = await pollForToken(profile, deviceAuth);
+  if (!tokenInfo) {
+    return { success: false, error: "Authorization failed or timed out" };
   }
 
-  // Needs SSO login
-  return { success: false, needsLogin: true, error: "Token expired" };
+  // Save token to SSO cache (for AWS CLI compatibility)
+  await saveSSOTokenToCache(profile, tokenInfo);
+
+  // Also get and save static credentials to credentials file
+  const creds = await getCredentialsWithToken(profile, tokenInfo.accessToken);
+  if (!creds) {
+    return { success: false, error: "Failed to get credentials" };
+  }
+  await writeCredentials(profile.name, creds);
+  return { success: true };
+}
+
+async function refreshProfile(
+  profile: SSOProfile
+): Promise<{ success: boolean; error?: string; needsLogin?: boolean }> {
+  // Check if we have a valid cached token
+  const cachedToken = await findCachedToken(profile);
+  if (!cachedToken || cachedToken.expiresAt <= new Date()) {
+    return { success: false, needsLogin: true };
+  }
+
+  // Use cached token to get credentials
+  const credentials = await getCredentialsWithToken(profile, cachedToken.accessToken);
+  if (!credentials) {
+    return { success: false, needsLogin: true };
+  }
+
+  await writeCredentials(profile.name, credentials);
+  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,7 +457,7 @@ async function refreshProfile(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function sendNotification(title: string, message: string): Promise<void> {
-  const os = platform();
+  const os = process.platform;
   try {
     if (os === "darwin") {
       await Bun.spawn([
@@ -362,16 +493,23 @@ function formatExpiry(date?: Date): string {
 }
 
 function getStatusColor(status: CredentialStatus): string {
-  switch (status) {
-    case "valid":
-      return "green";
-    case "expired":
-      return "red";
-    case "error":
-      return "yellow";
-    default:
-      return "gray";
-  }
+  const colors: Record<CredentialStatus, string> = {
+    valid: "green",
+    expired: "red",
+    error: "yellow",
+    unknown: "gray",
+  };
+  return colors[status];
+}
+
+function sortByFavorites<T>(items: T[], favorites: string[], getName: (item: T) => string): T[] {
+  return [...items].sort((a, b) => {
+    const aFav = favorites.includes(getName(a));
+    const bFav = favorites.includes(getName(b));
+    if (aFav && !bFav) return -1;
+    if (!aFav && bFav) return 1;
+    return getName(a).localeCompare(getName(b));
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -414,7 +552,7 @@ function useProfiles() {
     fetchProfiles();
   }, [fetchProfiles]);
 
-  return { profiles, statuses, loading, error, fetchProfiles, fetchStatuses };
+  return { profiles, statuses, loading, error, fetchStatuses };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -438,6 +576,69 @@ function useSettings() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hook: useDeviceAuth
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface UseDeviceAuthOptions {
+  pendingLogin: SSOProfile | null;
+  onLoginComplete: (profile: SSOProfile, result: { success: boolean; error?: string }) => void;
+  onCopyUrl?: () => void;
+}
+
+function useDeviceAuth({ pendingLogin, onLoginComplete, onCopyUrl }: UseDeviceAuthOptions) {
+  const [deviceAuth, setDeviceAuth] = useState<DeviceAuthInfo | null>(null);
+  const [authorizing, setAuthorizing] = useState(false);
+  const { copy, copied } = useCopy();
+  const currentProfileRef = React.useRef<string | null>(null);
+
+  // Reset and start new device authorization when profile changes
+  useEffect(() => {
+    const profileName = pendingLogin?.name ?? null;
+
+    // If profile changed, reset state
+    if (profileName !== currentProfileRef.current) {
+      currentProfileRef.current = profileName;
+      setDeviceAuth(null);
+      setAuthorizing(false);
+
+      // Start new device authorization if we have a profile
+      if (pendingLogin) {
+        startDeviceAuthorization(pendingLogin).then(setDeviceAuth);
+      }
+    }
+  }, [pendingLogin]);
+
+  // Start polling automatically when deviceAuth is ready
+  useEffect(() => {
+    if (!pendingLogin || !deviceAuth || authorizing) return;
+
+    setAuthorizing(true);
+    performSSOLoginFlow(pendingLogin, deviceAuth).then((result) => {
+      onLoginComplete(pendingLogin, result);
+    });
+  }, [pendingLogin, deviceAuth, authorizing, onLoginComplete]);
+
+  const handleEnter = useCallback(() => {
+    if (!deviceAuth) return;
+    openBrowser(deviceAuth.verificationUri);
+  }, [deviceAuth]);
+
+  const handleCopy = useCallback(() => {
+    if (!deviceAuth) return;
+    copy(deviceAuth.verificationUri);
+    onCopyUrl?.();
+  }, [deviceAuth, copy, onCopyUrl]);
+
+  return {
+    deviceAuth,
+    authorizing,
+    copied,
+    handleEnter,
+    handleCopy,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Status Table Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -447,13 +648,7 @@ interface StatusTableProps {
 }
 
 function StatusTable({ statuses, favorites }: StatusTableProps) {
-  const sorted = [...statuses].sort((a, b) => {
-    const aFav = favorites.includes(a.profile.name);
-    const bFav = favorites.includes(b.profile.name);
-    if (aFav && !bFav) return -1;
-    if (!aFav && bFav) return 1;
-    return a.profile.name.localeCompare(b.profile.name);
-  });
+  const sorted = sortByFavorites(statuses, favorites, (s) => s.profile.name);
 
   return (
     <Box flexDirection="column">
@@ -490,45 +685,82 @@ function StatusTable({ statuses, favorites }: StatusTableProps) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared Login Prompt Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface LoginPromptProps {
+  profile: SSOProfile;
+  deviceAuth: DeviceAuthInfo | null;
+  pendingCount?: number;
+  copied?: boolean;
+  authorizing?: boolean;
+}
+
+function LoginPrompt({ profile, deviceAuth, pendingCount = 0, copied = false, authorizing = false }: LoginPromptProps) {
+  if (!deviceAuth) {
+    return (
+      <Box marginTop={1} flexDirection="column">
+        <Text color="yellow">SSO login required for {profile.name}</Text>
+        <Spinner label="Initializing device authorization..." />
+      </Box>
+    );
+  }
+
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text color="yellow">SSO login required for {profile.name}</Text>
+      {pendingCount > 0 && (
+        <Text dimColor>({pendingCount} more profile{pendingCount > 1 ? 's' : ''} pending)</Text>
+      )}
+      <Box marginTop={1} flexDirection="column">
+        <Box>
+          <Text dimColor>URL: </Text>
+          <Text color="cyan">{deviceAuth.verificationUri}</Text>
+          {copied && <Text color="green"> (copied!)</Text>}
+        </Box>
+        <Box>
+          <Text dimColor>Code: </Text>
+          <Text color="magenta" bold>{deviceAuth.userCode}</Text>
+        </Box>
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        {authorizing && <Spinner label="Waiting for browser authorization..." />}
+        <Text dimColor>Press Enter to open browser, c to copy URL</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Refresh Progress Component
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface RefreshProgressProps {
   profiles: SSOProfile[];
   settings: AppSettings;
-  onComplete: () => void;
   onBack: () => void;
 }
 
-function RefreshProgress({ profiles, settings, onComplete, onBack }: RefreshProgressProps) {
-  const [results, setResults] = useState<{ name: string; success: boolean; error?: string; needsLogin?: boolean }[]>([]);
+function RefreshProgress({ profiles, settings, onBack }: RefreshProgressProps) {
+  const [results, setResults] = useState<{ name: string; success: boolean; error?: string }[]>([]);
   const [current, setCurrent] = useState(0);
   const [pendingLogin, setPendingLogin] = useState<SSOProfile | null>(null);
-  const { exit } = useApp();
+
+  const handleLoginComplete = useCallback((profile: SSOProfile, result: { success: boolean; error?: string }) => {
+    setResults((prev) => [...prev, { name: profile.name, success: result.success, error: result.error }]);
+    setPendingLogin(null);
+    setCurrent((c) => c + 1);
+  }, []);
+
+  const { deviceAuth, authorizing, copied, handleEnter, handleCopy } = useDeviceAuth({
+    pendingLogin,
+    onLoginComplete: handleLoginComplete,
+  });
 
   useInput((input, key) => {
-    if (pendingLogin && key.return) {
-      // Trigger SSO login
-      triggerSSOLogin(pendingLogin).then(async (success) => {
-        if (success) {
-          const creds = await getCredentials(pendingLogin);
-          if (creds) {
-            await writeCredentials(pendingLogin.name, creds);
-            setResults((prev) => [...prev, { name: pendingLogin.name, success: true }]);
-          } else {
-            setResults((prev) => [...prev, { name: pendingLogin.name, success: false, error: "Failed to get credentials" }]);
-          }
-        } else {
-          setResults((prev) => [...prev, { name: pendingLogin.name, success: false, error: "Login cancelled" }]);
-        }
-        setPendingLogin(null);
-        setCurrent((c) => c + 1);
-      });
-    }
-
-    if (key.escape) {
-      onBack();
-    }
+    if (key.return) handleEnter();
+    if (input === "c") handleCopy();
+    if (key.escape && !authorizing) onBack();
   });
 
   useEffect(() => {
@@ -539,7 +771,7 @@ function RefreshProgress({ profiles, settings, onComplete, onBack }: RefreshProg
     if (pendingLogin) return;
 
     const profile = profiles[current];
-    refreshProfile(profile, settings).then((result) => {
+    refreshProfile(profile).then((result) => {
       if (result.needsLogin) {
         if (settings.notifications) {
           sendNotification("AWS SSO Login Required", `Token expired for profile '${profile.name}'`);
@@ -592,15 +824,12 @@ function RefreshProgress({ profiles, settings, onComplete, onBack }: RefreshProg
           <StatusMessage type={errorCount > 0 ? "warning" : "success"}>
             Refreshed {successCount} profile(s){errorCount > 0 ? `, ${errorCount} error(s)` : ""}
           </StatusMessage>
-          <Box marginTop={1}>
-            <Text dimColor>Profiles: </Text>
-            <Text>{results.filter(r => r.success).map(r => r.name).join(", ")}</Text>
-          </Box>
-          <Box>
-            <Text dimColor>Refresh interval: </Text>
-            <Text color="cyan">{settings.defaultInterval} min</Text>
-            <Text dimColor> (change in Settings)</Text>
-          </Box>
+          {successCount > 0 && (
+            <Box marginTop={1}>
+              <Text dimColor>Profiles: </Text>
+              <Text>{results.filter(r => r.success).map(r => r.name).join(", ")}</Text>
+            </Box>
+          )}
           <Box marginTop={1}>
             <Text dimColor>Press b to go back</Text>
           </Box>
@@ -608,10 +837,12 @@ function RefreshProgress({ profiles, settings, onComplete, onBack }: RefreshProg
       )}
 
       {pendingLogin && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color="yellow">SSO login required for {pendingLogin.name}</Text>
-          <Text dimColor>Press Enter to open browser for authentication</Text>
-        </Box>
+        <LoginPrompt
+          profile={pendingLogin}
+          deviceAuth={deviceAuth}
+          copied={copied}
+          authorizing={authorizing}
+        />
       )}
     </Box>
   );
@@ -633,46 +864,66 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
   const [nextRefresh, setNextRefresh] = useState<Date | null>(null);
   const [results, setResults] = useState<{ name: string; success: boolean }[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const { exit } = useApp();
+  const [pendingLogin, setPendingLogin] = useState<SSOProfile | null>(null);
+  const [pendingQueue, setPendingQueue] = useState<SSOProfile[]>([]);
+
+  const processNextLogin = useCallback(() => {
+    if (pendingQueue.length > 0) {
+      const [next, ...rest] = pendingQueue;
+      setPendingQueue(rest);
+      setPendingLogin(next);
+    } else {
+      setPendingLogin(null);
+      setLastRefresh(new Date());
+      setNextRefresh(new Date(Date.now() + intervalMinutes * 60 * 1000));
+      setRefreshing(false);
+    }
+  }, [pendingQueue, intervalMinutes]);
+
+  const handleLoginComplete = useCallback((profile: SSOProfile, result: { success: boolean }) => {
+    setResults((prev) => [...prev, { name: profile.name, success: result.success }]);
+    processNextLogin();
+  }, [processNextLogin]);
+
+  const { deviceAuth, authorizing, copied, handleEnter, handleCopy } = useDeviceAuth({
+    pendingLogin,
+    onLoginComplete: handleLoginComplete,
+  });
 
   useInput((input, key) => {
     if ((key.ctrl && input === "c") || input === "q") {
       onStop();
     }
+    if (key.return) handleEnter();
+    if (input === "c" && !key.ctrl) handleCopy();
   });
 
   const doRefresh = useCallback(async () => {
     setRefreshing(true);
-    const newResults: { name: string; success: boolean }[] = [];
+    setResults([]);
+    const profilesNeedingLogin: SSOProfile[] = [];
 
     for (const profile of profiles) {
-      const result = await refreshProfile(profile, settings);
+      const result = await refreshProfile(profile);
       if (result.needsLogin) {
         if (settings.notifications) {
           sendNotification("AWS SSO Login Required", `Token expired for profile '${profile.name}'`);
         }
-        // Trigger login
-        const loginSuccess = await triggerSSOLogin(profile);
-        if (loginSuccess) {
-          const creds = await getCredentials(profile);
-          if (creds) {
-            await writeCredentials(profile.name, creds);
-            newResults.push({ name: profile.name, success: true });
-          } else {
-            newResults.push({ name: profile.name, success: false });
-          }
-        } else {
-          newResults.push({ name: profile.name, success: false });
-        }
+        profilesNeedingLogin.push(profile);
       } else {
-        newResults.push({ name: profile.name, success: result.success });
+        setResults((prev) => [...prev, { name: profile.name, success: result.success }]);
       }
     }
 
-    setResults(newResults);
-    setLastRefresh(new Date());
-    setNextRefresh(new Date(Date.now() + intervalMinutes * 60 * 1000));
-    setRefreshing(false);
+    if (profilesNeedingLogin.length > 0) {
+      const [first, ...rest] = profilesNeedingLogin;
+      setPendingQueue(rest);
+      setPendingLogin(first);
+    } else {
+      setLastRefresh(new Date());
+      setNextRefresh(new Date(Date.now() + intervalMinutes * 60 * 1000));
+      setRefreshing(false);
+    }
   }, [profiles, settings, intervalMinutes]);
 
   useEffect(() => {
@@ -685,19 +936,31 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
   const errorCount = results.filter((r) => !r.success).length;
 
   return (
-    <Card title="Auto-Refresh Daemon">
-      <Box flexDirection="column">
-        <Text><Text dimColor>Profiles:</Text> {profiles.map(p => p.name).join(", ")}</Text>
-        <Text><Text dimColor>Interval:</Text> {intervalMinutes} min</Text>
-        {lastRefresh && <Text><Text dimColor>Last:</Text> {lastRefresh.toLocaleTimeString()}</Text>}
-        {nextRefresh && !refreshing && <Text><Text dimColor>Next:</Text> {nextRefresh.toLocaleTimeString()}</Text>}
-        {refreshing ? (
-          <Spinner label="Refreshing..." />
-        ) : results.length > 0 && (
-          <Text color={errorCount > 0 ? "yellow" : "green"}>✓ {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}</Text>
-        )}
-      </Box>
-    </Card>
+    <Box flexDirection="column">
+      <Card title="Auto-Refresh Daemon">
+        <Box flexDirection="column">
+          <Text><Text dimColor>Profiles:</Text> {profiles.map(p => p.name).join(", ")}</Text>
+          <Text><Text dimColor>Interval:</Text> {intervalMinutes} min</Text>
+          {lastRefresh && <Text><Text dimColor>Last:</Text> {lastRefresh.toLocaleTimeString()}</Text>}
+          {nextRefresh && !refreshing && !pendingLogin && <Text><Text dimColor>Next:</Text> {nextRefresh.toLocaleTimeString()}</Text>}
+          {refreshing && !pendingLogin ? (
+            <Spinner label="Refreshing..." />
+          ) : results.length > 0 && !pendingLogin && (
+            <Text color={errorCount > 0 ? "yellow" : "green"}>✓ {successCount} refreshed{errorCount > 0 ? `, ${errorCount} errors` : ""}</Text>
+          )}
+        </Box>
+      </Card>
+
+      {pendingLogin && (
+        <LoginPrompt
+          profile={pendingLogin}
+          deviceAuth={deviceAuth}
+          pendingCount={pendingQueue.length}
+          copied={copied}
+          authorizing={authorizing}
+        />
+      )}
+    </Box>
   );
 }
 
@@ -706,7 +969,7 @@ function DaemonView({ profiles, intervalMinutes, settings, onStop }: DaemonViewP
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AWSCredsManager() {
-  const { profiles, statuses, loading, error, fetchProfiles, fetchStatuses } = useProfiles();
+  const { profiles, statuses, loading, error, fetchStatuses } = useProfiles();
   const { settings, updateSettings } = useSettings();
   const [view, setView] = useState<ViewState>("menu");
   const [selectedProfiles, setSelectedProfiles] = useState<SSOProfile[]>([]);
@@ -714,7 +977,7 @@ function AWSCredsManager() {
   const { exit } = useApp();
 
   // Handle keyboard for navigation
-  useInput((input, key) => {
+  useInput((input) => {
     if (input === "b" && view !== "menu" && view !== "daemon-running") {
       setView("menu");
     }
@@ -722,9 +985,9 @@ function AWSCredsManager() {
 
   // Menu items
   const menuItems: ListItemData[] = [
-    { id: "status", label: "Check credentials status", hint: "view all profiles", value: "status" },
-    { id: "refresh", label: "Refresh credentials", hint: "select profiles", value: "refresh" },
-    { id: "daemon", label: "Start auto-refresh daemon", hint: "continuous mode", value: "daemon" },
+    { id: "status", label: "Check status", hint: "view all profiles", value: "status" },
+    { id: "refresh", label: "Refresh now", hint: "one-time", value: "refresh" },
+    { id: "daemon", label: "Auto-refresh", hint: "runs continuously", value: "daemon" },
     { id: "settings", label: "Settings", hint: "notifications & defaults", value: "settings" },
     { id: "exit", label: "Exit", value: "exit" },
   ];
@@ -758,25 +1021,20 @@ function AWSCredsManager() {
   }));
 
   // Profile items for multi-select
-  const profileItems: MultiSelectItemData[] = profiles.map((profile) => {
-    const status = statuses.find((s) => s.profile.name === profile.name);
-    const statusSymbol = status ? (status.status === "valid" ? "●" : status.status === "expired" ? "○" : "◌") : "?";
-    const statusColor = status ? getStatusColor(status.status) : "gray";
-    const isFavorite = settings.favoriteProfiles.includes(profile.name);
-
-    return {
-      id: profile.name,
-      label: `${profile.name}${isFavorite ? " ★" : ""}`,
-      hint: status?.status || "unknown",
-      value: profile,
-    };
-  }).sort((a, b) => {
-    const aFav = settings.favoriteProfiles.includes(a.id);
-    const bFav = settings.favoriteProfiles.includes(b.id);
-    if (aFav && !bFav) return -1;
-    if (!aFav && bFav) return 1;
-    return a.id.localeCompare(b.id);
-  });
+  const profileItems: MultiSelectItemData[] = sortByFavorites(
+    profiles.map((profile) => {
+      const status = statuses.find((s) => s.profile.name === profile.name);
+      const isFavorite = settings.favoriteProfiles.includes(profile.name);
+      return {
+        id: profile.name,
+        label: `${profile.name}${isFavorite ? " ★" : ""}`,
+        hint: status?.status || "unknown",
+        value: profile,
+      };
+    }),
+    settings.favoriteProfiles,
+    (item) => item.id
+  );
 
   // Handlers
   const handleMenuSelect = (item: ListItemData) => {
@@ -950,7 +1208,6 @@ function AWSCredsManager() {
           <RefreshProgress
             profiles={selectedProfiles}
             settings={settings}
-            onComplete={() => setView("menu")}
             onBack={() => setView("menu")}
           />
         );

@@ -22,37 +22,55 @@ bun run start
 | React | Component framework |
 | Ink | React renderer for CLI |
 | @toolbox/common | Shared UI components and utilities |
-| @aws-sdk/client-sts | Token validation |
-| @aws-sdk/credential-providers | SSO credential provider |
-| ini | Parse/write AWS credentials file |
+| @aws-sdk/client-sso-oidc | Device authorization flow |
+| @aws-sdk/client-sso | Get role credentials |
+| ini | Parse/write AWS config files |
 
 ## Features
 
-- **Auto-discovery** - Scans `~/.aws/config` for SSO profiles
+- **Auto-discovery** - Scans `~/.aws/config` for SSO profiles (both legacy and sso_session)
 - **Status check** - Shows token validity with expiry countdown
-- **Credential refresh** - Multi-select profiles, triggers SSO login if needed
-- **Daemon mode** - Auto-refresh at configurable intervals
+- **One-time refresh** - Multi-select profiles, triggers SSO login if needed
+- **Auto-refresh daemon** - Continuous refresh at configurable intervals
+- **Device auth flow** - Shows URL + code, press Enter to open browser or copy URL
 - **Settings** - Notifications, default interval, favorite profiles
-- **Cross-platform notifications** - macOS (osascript), Linux (notify-send)
+- **Cross-platform** - macOS/Linux notifications, clipboard support
 
 ## Architecture
 
-Single-file React/Ink application using shared components from `@toolbox/common`:
+Single-file React/Ink application:
 
 ```
 src/index.tsx
 ├── Types & Constants
-├── File utilities (parseAwsConfig, writeCredentials, loadSettings, saveSettings)
-├── SSO cache operations
-├── AWS operations (discoverProfiles, checkTokenStatus, refreshProfile)
-├── Notification system
-├── Utility functions (formatExpiry, getStatusColor)
+├── File Utilities
+│   ├── parseIniFile() - Parse AWS config/credentials
+│   ├── writeCredentials() - Save credentials to file
+│   ├── loadSettings() / saveSettings()
+├── SSO Cache
+│   └── findCachedToken() - Read SSO token from cache
+├── AWS Operations
+│   ├── discoverProfiles() - Find SSO profiles in config
+│   ├── checkTokenStatus() - Check if token is valid
+│   └── refreshProfile() - Refresh credentials
+├── SSO OIDC Device Auth Flow
+│   ├── startDeviceAuthorization() - Get device code + URL
+│   ├── pollForToken() - Wait for browser auth
+│   ├── saveSSOTokenToCache() - Save token for AWS CLI
+│   ├── getCredentialsWithToken() - Get role credentials
+│   └── performSSOLoginFlow() - Complete login flow
+├── Utility Functions
+│   ├── formatExpiry() - Format time remaining
+│   ├── getStatusColor() - Status to color mapping
+│   └── sortByFavorites() - Sort with favorites first
 ├── Hooks
-│   ├── useProfiles() - Profile discovery and status checking
-│   └── useSettings() - Settings management
+│   ├── useProfiles() - Profile discovery and status
+│   ├── useSettings() - Settings management
+│   └── useDeviceAuth() - Device auth flow state
 ├── Components
 │   ├── StatusTable - Profile status display
-│   ├── RefreshProgress - Refresh progress with SSO login
+│   ├── LoginPrompt - SSO login UI with URL/code
+│   ├── RefreshProgress - One-time refresh progress
 │   └── DaemonView - Auto-refresh daemon
 └── Main AWSCredsManager component
 ```
@@ -61,10 +79,10 @@ src/index.tsx
 
 | View | Description |
 |------|-------------|
-| menu | Main menu with actions |
+| menu | Main menu (Check status, Refresh now, Auto-refresh, Settings) |
 | status | Profile status table |
 | refresh-select | Multi-select profiles to refresh |
-| refresh | Refresh progress display |
+| refresh | Refresh progress with SSO login prompts |
 | daemon-select | Select profiles for daemon |
 | daemon-interval | Select refresh interval |
 | daemon-running | Running daemon with countdown |
@@ -76,27 +94,34 @@ src/index.tsx
 
 ```tsx
 import {
-  App,
-  renderApp,
-  List,
-  MultiSelectList,
-  Card,
-  Spinner,
-  StatusMessage,
-  ACTIONS,
+  App, renderApp,
+  List, MultiSelectList,
+  Card, Spinner, StatusMessage,
+  ACTIONS, useCopy,
   type ListItemData,
   type MultiSelectItemData,
 } from "@toolbox/common";
 ```
 
-## AWS Files Used
+## AWS Files
 
 | Path | Purpose |
 |------|---------|
 | `~/.aws/config` | Read SSO profile configurations |
-| `~/.aws/credentials` | Write refreshed credentials |
-| `~/.aws/sso/cache/*.json` | Read token expiry times |
-| `~/.aws/credentials-manager.json` | App settings persistence |
+| `~/.aws/credentials` | Write refreshed static credentials |
+| `~/.aws/sso/cache/*.json` | Read/write SSO tokens (AWS CLI compatible) |
+| `~/.aws/credentials-manager.json` | App settings |
+
+## SSO Login Flow
+
+1. Check if cached SSO token exists and is valid
+2. If expired, start device authorization (RegisterClient + StartDeviceAuthorization)
+3. Show URL + user code to user
+4. User can press Enter to open browser, or 'c' to copy URL
+5. Poll for token (CreateToken) until user authorizes
+6. Save token to SSO cache (for AWS CLI compatibility)
+7. Get role credentials (GetRoleCredentials)
+8. Write credentials to ~/.aws/credentials
 
 ## Settings Schema
 
@@ -123,5 +148,9 @@ interface AppSettings {
 - `Enter` - Confirm
 - `Esc/q` - Cancel
 
+### SSO Login Prompt
+- `Enter` - Open browser
+- `c` - Copy URL to clipboard
+
 ### Daemon Mode
-- `Ctrl+C` - Stop daemon
+- `q` or `Ctrl+C` - Stop daemon

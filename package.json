@@ -15,6 +15,7 @@
     "build:ec2-ssm": "bun run --cwd packages/ec2-ssm build",
     "build:secrets-view": "bun run --cwd packages/secrets-view build",
     "build:proc-manager": "bun run --cwd packages/proc-manager build",
+    "lint": "eslint packages/*/src",
     "changeset": "changeset",
     "version": "changeset version",
     "prepare": "husky"
@@ -24,6 +25,14 @@
     "@changesets/cli": "^2.29.8",
     "@commitlint/cli": "^20.2.0",
     "@commitlint/config-conventional": "^20.2.0",
+    "@eslint/js": "^9.0.0",
+    "@types/react": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "bun-types": "latest",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
     "husky": "^9.1.7",
     "react-devtools-core": "^7.0.1"
   }

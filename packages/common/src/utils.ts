@@ -10,7 +10,9 @@ import { spawn } from "child_process";
 export async function copyToClipboard(text: string): Promise<boolean> {
   return new Promise((resolve) => {
     const cmd = process.platform === "darwin" ? "pbcopy" : "xclip -selection clipboard";
-    const proc = spawn("sh", ["-c", `echo -n "${text.replace(/"/g, '\\"')}" | ${cmd}`], {
+    // Use printf instead of echo -n for better portability
+    const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%");
+    const proc = spawn("sh", ["-c", `printf '%s' "${escaped}" | ${cmd}`], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 

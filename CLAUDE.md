@@ -17,6 +17,8 @@ toolbox/
 │   ├── secrets-view/    # Secrets Manager browser
 │   └── proc-manager/    # Process and port manager
 ├── dist/                # Compiled binaries (after build)
+├── tsconfig.json        # Shared TypeScript config (bun-types)
+├── eslint.config.js     # Shared ESLint config (flat config)
 └── package.json         # Workspace root
 ```
 
@@ -28,6 +30,7 @@ toolbox/
 | TypeScript | Language (native Bun support) |
 | React | Component framework |
 | Ink | React renderer for CLI |
+| ESLint | Linting (flat config) |
 | @toolbox/common | Shared UI components and utilities |
 
 ## Commands
@@ -39,6 +42,9 @@ bun run aws-creds        # Run aws-creds
 bun run ec2-ssm          # Run ec2-ssm
 bun run secrets-view     # Run secrets-view
 bun run proc-manager     # Run proc-manager
+
+# Quality
+bun run lint             # Run ESLint on all packages
 
 # Build standalone binaries
 bun run build            # Build all to dist/
